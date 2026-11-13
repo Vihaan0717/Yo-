@@ -82,8 +82,13 @@ function ChatsTab({ onOpen }: { onOpen: (c: Chat) => void }) {
 
 function Typing() {
   return (
-    <span className="flex items-center gap-1 text-sm text-primary">typing
-      {[0, 1, 2].map((i) => <span key={i} className="animate-typing h-1 w-1 rounded-full bg-primary" style={{ animationDelay: `${i * 0.15}s` }} />)}
+    <span className="flex items-center gap-1.5 text-sm font-medium text-[#2dd4bf]">
+      <span>typing</span>
+      <span className="flex items-center gap-1 ml-0.5">
+        <span className="animate-typing-dot h-1.5 w-1.5 rounded-full bg-[#2dd4bf]" style={{ animationDelay: '0s' }} />
+        <span className="animate-typing-dot h-1.5 w-1.5 rounded-full bg-[#2dd4bf]" style={{ animationDelay: '0.2s' }} />
+        <span className="animate-typing-dot h-1.5 w-1.5 rounded-full bg-[#2dd4bf]" style={{ animationDelay: '0.4s' }} />
+      </span>
     </span>
   );
 }
@@ -178,13 +183,13 @@ function SettingsTab() {
   );
 }
 
-function ChatView({ 
-  chat, 
-  onBack, 
-  onStartCall 
-}: { 
-  chat: Chat; 
-  onBack: () => void; 
+function ChatView({
+  chat,
+  onBack,
+  onStartCall
+}: {
+  chat: Chat;
+  onBack: () => void;
   onStartCall: (type: "audio" | "video", chat: Chat) => void;
 }) {
   const [msgs, setMsgs] = useState(seedMessages);
@@ -300,14 +305,15 @@ export function YoApp() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background">
-      <div aria-hidden className="pointer-events-none fixed inset-0">
-        <div className="animate-blob absolute -left-20 top-10 h-80 w-80 rounded-full bg-primary/40 blur-3xl" />
-        <div className="animate-blob absolute right-[-60px] top-1/3 h-96 w-96 rounded-full bg-accent/30 blur-3xl" style={{ animationDelay: "-5s" }} />
-        <div className="animate-blob absolute bottom-0 left-1/4 h-72 w-72 rounded-full bg-chart-4/30 blur-3xl" style={{ animationDelay: "-9s" }} />
+    <div className="relative min-h-screen overflow-hidden bg-[#0d131f]">
+      {/* Dynamic ambient iOS light orbs for Glassmorphism backdrop */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="animate-blob absolute -left-20 top-10 h-80 w-80 rounded-full bg-[#0ea5e9]/25 blur-[90px]" />
+        <div className="animate-blob absolute right-[-60px] top-1/4 h-96 w-96 rounded-full bg-[#2dd4bf]/20 blur-[100px]" style={{ animationDelay: "-5s" }} />
+        <div className="animate-blob absolute bottom-10 left-1/4 h-80 w-80 rounded-full bg-[#8b5cf6]/20 blur-[110px]" style={{ animationDelay: "-9s" }} />
       </div>
       <LayoutGroup>
-        <main className="relative mx-auto h-screen max-w-md overflow-hidden">
+        <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-white/5">
           <div className="h-full overflow-y-auto">
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.div key={tab} initial={{ opacity: 0, y: 12, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
@@ -336,10 +342,10 @@ export function YoApp() {
           </nav>
           <AnimatePresence>
             {open && (
-              <ChatView 
-                key={open.id} 
-                chat={open} 
-                onBack={() => setOpen(null)} 
+              <ChatView
+                key={open.id}
+                chat={open}
+                onBack={() => setOpen(null)}
                 onStartCall={startCall}
               />
             )}
