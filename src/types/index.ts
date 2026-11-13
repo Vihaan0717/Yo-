@@ -41,3 +41,4 @@ export interface CallSession {
   status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed';
   started_at: string;
 }
+
