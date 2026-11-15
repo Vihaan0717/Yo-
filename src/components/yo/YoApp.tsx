@@ -24,6 +24,9 @@ import {
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
+import { ImageBubble } from "./ImageBubble";
+import { LightboxModal } from "./LightboxModal";
+import { ImageService } from "../../services/media/ImageService";
 import { VoiceRecorderService } from "../../services/voice/VoiceRecorderService";
 import { CallOverlay } from "../../features/calls/components/CallOverlay";
 import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
@@ -378,6 +381,7 @@ function ChatView({
     time: string;
     message_type?: string;
     audio_url?: string;
+    image_url?: string;
     reactions?: Record<string, string[]>;
     reply_quote?: { id: string; sender_name: string; content: string };
   }>>([]);
@@ -388,6 +392,9 @@ function ChatView({
   const [recordDuration, setRecordDuration] = useState(0);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | number | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; sender_name: string; content: string } | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<{ url: string; sender: string; time: string } | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
   const recorderRef = useRef<VoiceRecorderService | null>(null);
@@ -407,12 +414,20 @@ function ChatView({
         .order('created_at', { ascending: true });
 
       if (!error && data) {
-        setMsgs(data.map((m: any) => ({
-          id: m.id,
-          me: m.sender_id === user?.id,
-          text: m.content,
-          time: new Date(m.created_at).toTimeString().slice(0, 5)
-        })));
+        setMsgs(data.map((m: any) => {
+          const isAudio = m.message_type === 'audio' || (typeof m.content === 'string' && m.content.startsWith('data:audio'));
+          const isImage = m.message_type === 'image' || (typeof m.content === 'string' && m.content.startsWith('data:image'));
+          return {
+            id: m.id,
+            me: m.sender_id === user?.id,
+            text: isImage ? 'Photo' : (isAudio ? 'Voice message' : m.content),
+            message_type: isImage ? 'image' : (isAudio ? 'audio' : (m.message_type || 'text')),
+            audio_url: isAudio ? m.content : undefined,
+            image_url: isImage ? m.content : undefined,
+            reply_quote: m.reply_quote,
+            time: new Date(m.created_at).toTimeString().slice(0, 5)
+          };
+        }));
       }
       setLoading(false);
 
@@ -428,12 +443,18 @@ function ChatView({
 
           setMsgs((prev) => {
             if (prev.some((m) => m.id === msg.id || (m.text === msg.content && Math.abs(Number(m.id) - Number(msg.id)) < 2000))) return prev;
+            const isAudio = msg.message_type === 'audio' || (typeof msg.content === 'string' && msg.content.startsWith('data:audio'));
+            const isImage = msg.message_type === 'image' || (typeof msg.content === 'string' && msg.content.startsWith('data:image'));
             return [
               ...prev,
               {
                 id: msg.id,
                 me: false,
-                text: msg.content,
+                text: isImage ? 'Photo' : (isAudio ? 'Voice message' : msg.content),
+                message_type: isImage ? 'image' : (isAudio ? 'audio' : (msg.message_type || 'text')),
+                audio_url: isAudio ? (msg.audio_url || msg.content) : undefined,
+                image_url: isImage ? (msg.image_url || msg.content) : undefined,
+                reply_quote: msg.reply_quote,
                 time: msg.time || new Date().toTimeString().slice(0, 5)
               }
             ];
@@ -472,12 +493,17 @@ function ChatView({
             setMsgs((prev) => {
               // Deduplicate if already present from local optimistic send or broadcast
               if (prev.some((m) => m.id === newMsg.id || (m.me && m.text === newMsg.content))) return prev;
+              const isAudio = newMsg.message_type === 'audio' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:audio'));
+              const isImage = newMsg.message_type === 'image' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:image'));
               return [
                 ...prev,
                 {
                   id: newMsg.id,
                   me: newMsg.sender_id === user?.id,
-                  text: newMsg.content,
+                  text: isImage ? 'Photo' : (isAudio ? 'Voice message' : newMsg.content),
+                  message_type: isImage ? 'image' : (isAudio ? 'audio' : (newMsg.message_type || 'text')),
+                  audio_url: isAudio ? newMsg.content : undefined,
+                  image_url: isImage ? newMsg.content : undefined,
                   time: new Date(newMsg.created_at).toTimeString().slice(0, 5)
                 }
               ];
@@ -577,6 +603,79 @@ function ChatView({
     clearInterval(recordTimerRef.current);
     setIsRecording(false);
     setRecordDuration(0);
+  };
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    e.target.value = ''; // reset so same file can be reselected
+
+    setIsUploadingImage(true);
+    try {
+      const processed = await ImageService.processImageFile(file, 1280, 0.78);
+      const nowTime = new Date().toTimeString().slice(0, 5);
+      const tempId = `img-${Date.now()}`;
+      const currentReply = replyingTo;
+      setReplyingTo(null);
+
+      const newEntry = {
+        id: tempId,
+        me: true,
+        text: "Photo",
+        message_type: 'image',
+        image_url: processed.dataUrl,
+        time: nowTime,
+        reply_quote: currentReply || undefined,
+        reactions: {}
+      };
+
+      // 1. Instant local optimistic display
+      setMsgs((m) => [...m, newEntry]);
+
+      // 2. Broadcast to peer room channel
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'new_msg',
+          payload: {
+            id: tempId,
+            conversation_id: chat.id,
+            sender_id: user.id,
+            content: processed.dataUrl,
+            message_type: 'image',
+            image_url: processed.dataUrl,
+            time: nowTime,
+            reply_quote: currentReply
+          }
+        });
+      }
+
+      // 3. Global notification badge
+      supabase.channel('global_messages_listener').send({
+        type: 'broadcast',
+        event: 'new_msg',
+        payload: {
+          id: tempId,
+          conversation_id: chat.id,
+          sender_id: user.id,
+          content: "📷 Photo",
+          time: nowTime
+        }
+      });
+
+      // 4. Supabase DB persistence
+      await supabase.from('messages').insert({
+        conversation_id: chat.id,
+        sender_id: user.id,
+        content: processed.dataUrl,
+        message_type: 'image',
+        reply_to: currentReply?.id || null
+      });
+    } catch (err) {
+      console.error("Failed to process image:", err);
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const toggleReaction = (msgId: string | number, emoji: string) => {
@@ -749,7 +848,11 @@ function ChatView({
                       </button>
                     ))}
                     <button
-                      onClick={() => setReplyingTo({ id: String(m.id), sender_name: m.me ? 'You' : chat.name, content: m.text })}
+                      onClick={() => setReplyingTo({ 
+                        id: String(m.id), 
+                        sender_name: m.me ? 'You' : chat.name, 
+                        content: (m.message_type === 'image' || m.text?.startsWith('data:image')) ? '📷 Photo' : (m.message_type === 'audio' ? '🎤 Voice note' : m.text) 
+                      })}
                       className="text-xs text-primary font-bold ml-1 pl-1.5 border-l border-white/20 hover:underline cursor-pointer"
                     >
                       Reply
@@ -779,9 +882,19 @@ function ChatView({
                   </div>
                 )}
 
-                {/* Voice Note Audio or Text message */}
+                {/* Voice Note Audio, Photo, or Text message */}
                 {m.message_type === 'audio' && m.audio_url ? (
                   <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
+                ) : (m.message_type === 'image' || m.image_url || m.text?.startsWith('data:image')) ? (
+                  <ImageBubble 
+                    imageUrl={m.image_url || m.text} 
+                    isOwn={m.me} 
+                    onOpenLightbox={() => setLightboxImage({ 
+                      url: m.image_url || m.text, 
+                      sender: m.me ? 'You' : chat.name, 
+                      time: m.time 
+                    })} 
+                  />
                 ) : (
                   <span>{m.text}</span>
                 )}
@@ -833,6 +946,14 @@ function ChatView({
         </div>
       )}
 
+      {/* Image Uploading / Compressing Pill HUD */}
+      {isUploadingImage && (
+        <div className="glass mx-3 mb-1 p-2 rounded-2xl flex items-center gap-2 text-xs text-primary animate-pulse">
+          <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
+          <span>Optimizing & sending photo...</span>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 p-3 pb-6">
         {isRecording ? (
           /* Live Recording Bar HUD */
@@ -850,7 +971,19 @@ function ChatView({
           </div>
         ) : (
           <>
-            <IconBtn label="Attach"><Plus className="h-5 w-5" /></IconBtn>
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleImageSelect} 
+              accept="image/*" 
+              className="hidden" 
+            />
+            <IconBtn 
+              label="Attach Photo" 
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Plus className="h-5 w-5" />
+            </IconBtn>
             <div className="glass flex flex-1 items-center rounded-full px-4 py-2.5">
               <input 
                 value={text} 
@@ -884,6 +1017,15 @@ function ChatView({
           </AnimatePresence>
         </motion.button>
       </div>
+
+      {/* Full-Screen Glass Lightbox Viewer */}
+      <LightboxModal
+        isOpen={!!lightboxImage}
+        imageUrl={lightboxImage?.url || null}
+        senderName={lightboxImage?.sender}
+        timestamp={lightboxImage?.time}
+        onClose={() => setLightboxImage(null)}
+      />
     </motion.div>
   );
 }
