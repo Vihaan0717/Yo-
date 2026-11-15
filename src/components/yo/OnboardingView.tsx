@@ -9,7 +9,8 @@ import {
   Mail, 
   User, 
   AtSign, 
-  Globe2
+  Globe2,
+  CheckCircle2
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -26,6 +27,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const introSlides = [
@@ -55,6 +57,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessNotice(null);
     setLoading(true);
 
     try {
@@ -69,8 +72,15 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
           return;
         }
         const res = await signUp(email, password, username, displayName);
-        if (res.error) setError(res.error);
-        else onComplete();
+        if (res.error) {
+          setError(res.error);
+        } else if (res.requiresEmailConfirmation) {
+          setSuccessNotice(
+            `Account created! Please check your inbox at ${email} to confirm your email, or disable 'Confirm email' in Supabase Auth settings to log in immediately.`
+          );
+        } else {
+          onComplete();
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Authentication error');
@@ -183,7 +193,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
         <div className="flex-1 flex flex-col justify-between py-6 z-10">
           <div>
             <button
-              onClick={() => { setMode('welcome'); setError(null); }}
+              onClick={() => { setMode('welcome'); setError(null); setSuccessNotice(null); }}
               className="glass px-3.5 py-1.5 rounded-full text-xs text-muted-foreground hover:text-white mb-6 inline-flex items-center gap-1 cursor-pointer"
             >
               ← Back
@@ -202,6 +212,13 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
               </div>
             )}
 
+            {successNotice && (
+              <div className="mt-4 p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs flex items-start gap-2.5">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">{successNotice}</div>
+              </div>
+            )}
+
             <form onSubmit={handleAuthSubmit} className="space-y-3.5 mt-6">
               {mode === 'register' && (
                 <>
@@ -214,7 +231,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
                         required
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder="e.g. Mugasala Rohit"
+                        placeholder="e.g. Alex Hunter"
                         className="glass w-full pl-11 pr-4 py-3 rounded-2xl text-sm outline-none text-white placeholder:text-muted-foreground"
                       />
                     </div>
@@ -229,7 +246,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
                         required
                         value={username}
                         onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                        placeholder="rohit"
+                        placeholder="alex"
                         className="glass w-full pl-11 pr-4 py-3 rounded-2xl text-sm outline-none text-white placeholder:text-muted-foreground"
                       />
                     </div>
@@ -292,7 +309,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
 
           <div className="text-center pt-4">
             <button
-              onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null); }}
+              onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null); setSuccessNotice(null); }}
               className="text-xs text-muted-foreground hover:text-white cursor-pointer"
             >
               {mode === 'login' ? "Don't have an account yet? " : "Already have an account? "}

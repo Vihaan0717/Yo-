@@ -7,7 +7,7 @@ interface AuthContextType {
   loading: boolean;
   isDemoMode: boolean;
   signIn: (email: string, pass: string) => Promise<{ error?: string }>;
-  signUp: (email: string, pass: string, username: string, displayName: string) => Promise<{ error?: string }>;
+  signUp: (email: string, pass: string, username: string, displayName: string) => Promise<{ error?: string; requiresEmailConfirmation?: boolean }>;
   signOut: () => Promise<void>;
   switchDemoUser: (userIndex: 1 | 2) => void;
 }
@@ -16,8 +16,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const DEMO_USER_1: Profile = {
   id: '00000000-0000-0000-0000-000000000001',
-  username: 'alex_yo',
-  display_name: 'Alex Rivera',
+  username: 'alex',
+  display_name: 'Alex Johnson',
   bio: 'Building things at the speed of thought 🚀',
   avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
   is_discoverable: true,
@@ -27,7 +27,7 @@ export const DEMO_USER_1: Profile = {
 
 export const DEMO_USER_2: Profile = {
   id: '00000000-0000-0000-0000-000000000002',
-  username: 'sam_tech',
+  username: 'samira',
   display_name: 'Samira Chen',
   bio: 'Designer, dreamer, creator ✨',
   avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
@@ -49,21 +49,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Supabase Auth listener
     const checkUser = async () => {
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .single();
-        setUser(profile || null);
-      } else {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .maybeSingle();
+
+          if (profile) {
+            setUser(profile);
+          } else {
+            // Fallback profile if record is still syncing
+            const meta = session.user.user_metadata || {};
+            setUser({
+              id: session.user.id,
+              username: meta.username || 'user_' + session.user.id.slice(0, 6),
+              display_name: meta.display_name || 'Yo User',
+              is_discoverable: true,
+              created_at: new Date().toISOString()
+            });
+          }
+        } else {
+          setUser(null);
+        }
+      } catch (err) {
+        console.warn('Auth check error:', err);
         setUser(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     checkUser();
@@ -74,8 +92,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
-          .single();
-        setUser(profile || null);
+          .maybeSingle();
+
+        if (profile) {
+          setUser(profile);
+        } else {
+          const meta = session.user.user_metadata || {};
+          setUser({
+            id: session.user.id,
+            username: meta.username || 'user_' + session.user.id.slice(0, 6),
+            display_name: meta.display_name || 'Yo User',
+            is_discoverable: true,
+            created_at: new Date().toISOString()
+          });
+        }
       } else {
         setUser(null);
       }
@@ -93,8 +123,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(DEMO_USER_1);
       return {};
     }
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-    return { error: error?.message };
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) return { error: error.message };
+
+    if (data.user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .maybeSingle();
+
+      if (profile) {
+        setUser(profile);
+      } else {
+        const meta = data.user.user_metadata || {};
+        setUser({
+          id: data.user.id,
+          username: meta.username || 'user',
+          display_name: meta.display_name || 'Yo User',
+          is_discoverable: true,
+          created_at: new Date().toISOString()
+        });
+      }
+    }
+    return {};
   };
 
   const signUp = async (email: string, pass: string, username: string, displayName: string) => {
@@ -106,17 +158,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       return {};
     }
-    const { error } = await supabase.auth.signUp({
-      email,
+
+    const cleanUsername = username.toLowerCase().trim();
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
       password: pass,
       options: {
         data: {
-          username,
-          display_name: displayName
+          username: cleanUsername,
+          display_name: displayName.trim()
         }
       }
     });
-    return { error: error?.message };
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    if (data.session && data.user) {
+      // Immediate session created (Email confirm is off)
+      const newProfile: Profile = {
+        id: data.user.id,
+        username: cleanUsername,
+        display_name: displayName.trim(),
+        is_discoverable: true,
+        created_at: new Date().toISOString()
+      };
+      
+      // Ensure profile exists in profiles table
+      await supabase.from('profiles').upsert(newProfile);
+      setUser(newProfile);
+      return {};
+    } else if (data.user && !data.session) {
+      // Supabase project requires email confirmation
+      return { requiresEmailConfirmation: true };
+    }
+
+    return {};
   };
 
   const signOut = async () => {
@@ -138,4 +216,3 @@ export const useAuth = () => {
   if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };
-
