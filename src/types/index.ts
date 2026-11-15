@@ -21,6 +21,18 @@ export interface Conversation {
   other_user?: Profile;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  users: string[]; // User IDs who reacted
+}
+
+export interface QuotedMessage {
+  id: string;
+  sender_name: string;
+  content: string;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -28,9 +40,11 @@ export interface Message {
   message_type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'system';
   content: string;
   reply_to?: string;
+  reply_quote?: QuotedMessage;
   created_at: string;
   is_own?: boolean;
   status?: 'sending' | 'sent' | 'delivered' | 'read';
+  reactions?: Record<string, string[]>; // emoji -> array of user_ids
 }
 
 export interface CallSession {
@@ -41,4 +55,3 @@ export interface CallSession {
   status: 'ringing' | 'accepted' | 'rejected' | 'missed' | 'ended' | 'failed';
   started_at: string;
 }
-

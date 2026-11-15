@@ -369,12 +369,22 @@ function ChatView({
   onStartCall: (type: "audio" | "video", chat: Chat) => void;
 }) {
   const { user } = useAuth();
-  const [msgs, setMsgs] = useState<Array<{ id: string | number; me: boolean; text: string; time: string }>>([]);
+  const [msgs, setMsgs] = useState<Array<{ 
+    id: string | number; 
+    me: boolean; 
+    text: string; 
+    time: string;
+    reactions?: Record<string, string[]>;
+    reply_quote?: { id: string; sender_name: string; content: string };
+  }>>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [isPeerTyping, setIsPeerTyping] = useState(false);
+  const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | number | null>(null);
+  const [replyingTo, setReplyingTo] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const typingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
+  const reactionOptions = ["❤️", "🔥", "😂", "👍", "😮", "🙏"];
 
   // Fetch real messages & listen to live broadcast and database changes
   useEffect(() => {
@@ -421,6 +431,24 @@ function ChatView({
             ];
           });
         })
+        .on('broadcast', { event: 'reaction_update' }, (payload: any) => {
+          const { msgId, emoji, userId } = payload.payload;
+          setMsgs((prev) =>
+            prev.map((m) => {
+              if (m.id !== msgId) return m;
+              const currentReactions = { ...(m.reactions || {}) };
+              const currentUsers = currentReactions[emoji] || [];
+              const exists = currentUsers.includes(userId);
+              const updatedUsers = exists ? currentUsers.filter((u) => u !== userId) : [...currentUsers, userId];
+              if (updatedUsers.length === 0) {
+                delete currentReactions[emoji];
+              } else {
+                currentReactions[emoji] = updatedUsers;
+              }
+              return { ...m, reactions: currentReactions };
+            })
+          );
+        })
         .on('broadcast', { event: 'typing' }, (payload: any) => {
           if (payload.payload?.sender_id !== user?.id) {
             setIsPeerTyping(true);
@@ -459,6 +487,35 @@ function ChatView({
     };
   }, [chat.id, user?.id]);
 
+  const toggleReaction = (msgId: string | number, emoji: string) => {
+    if (!user) return;
+    setActiveReactionMsgId(null);
+
+    setMsgs((prev) =>
+      prev.map((m) => {
+        if (m.id !== msgId) return m;
+        const currentReactions = { ...(m.reactions || {}) };
+        const currentUsers = currentReactions[emoji] || [];
+        const exists = currentUsers.includes(user.id);
+        const updatedUsers = exists ? currentUsers.filter((u) => u !== user.id) : [...currentUsers, user.id];
+        if (updatedUsers.length === 0) {
+          delete currentReactions[emoji];
+        } else {
+          currentReactions[emoji] = updatedUsers;
+        }
+        return { ...m, reactions: currentReactions };
+      })
+    );
+
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'reaction_update',
+        payload: { msgId, emoji, userId: user.id }
+      });
+    }
+  };
+
   const handleInputChange = (val: string) => {
     setText(val);
     if (channelRef.current && user) {
@@ -473,7 +530,9 @@ function ChatView({
   const send = async () => {
     if (!text.trim() || !user) return;
     const content = text.trim();
+    const currentReply = replyingTo;
     setText("");
+    setReplyingTo(null);
 
     const nowTime = new Date().toTimeString().slice(0, 5);
     const tempId = `msg-${Date.now()}`;
@@ -481,13 +540,15 @@ function ChatView({
       id: tempId,
       me: true,
       text: content,
-      time: nowTime
+      time: nowTime,
+      reply_quote: currentReply || undefined,
+      reactions: {}
     };
 
     // 1. Instant local display (Single message)
     setMsgs((m) => [...m, newEntry]);
 
-    // 2. Broadcast to other peer (Only they will render it)
+    // 2. Broadcast to other peer
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
@@ -496,7 +557,8 @@ function ChatView({
           id: tempId,
           sender_id: user.id,
           content,
-          time: nowTime
+          time: nowTime,
+          reply_quote: currentReply
         }
       });
     }
@@ -550,15 +612,82 @@ function ChatView({
         
         <AnimatePresence initial={false}>
           {msgs.map((m, i) => (
-            <motion.div key={m.id} layout initial={{ opacity: 0, y: 12, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
-              style={{ originX: m.me ? 1 : 0, originY: 1 }}
-              className={`max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] ${m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"}`}>
-              {m.text}
-              <span className={`ml-2 inline-flex items-center gap-0.5 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                {m.time}{m.me && <CheckCheck className="h-3 w-3" />}
-              </span>
-            </motion.div>
+            <div key={m.id} className="relative flex flex-col group">
+              {/* Floating Reaction Pill Picker on Tap/Long-Press */}
+              <AnimatePresence>
+                {activeReactionMsgId === m.id && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                    transition={spring}
+                    className={`absolute -top-12 z-40 glass-strong flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-2xl border border-white/20 ${
+                      m.me ? 'right-2' : 'left-2'
+                    }`}
+                  >
+                    {reactionOptions.map((emoji) => (
+                      <button
+                        key={emoji}
+                        onClick={() => toggleReaction(m.id, emoji)}
+                        className="text-base hover:scale-130 active:scale-95 transition-transform cursor-pointer p-0.5"
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setReplyingTo({ id: String(m.id), sender_name: m.me ? 'You' : chat.name, content: m.text })}
+                      className="text-xs text-primary font-bold ml-1 pl-1.5 border-l border-white/20 hover:underline cursor-pointer"
+                    >
+                      Reply
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <motion.div 
+                layout 
+                initial={{ opacity: 0, y: 12, scale: 0.95 }} 
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
+                style={{ originX: m.me ? 1 : 0, originY: 1 }}
+                onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
+                className={`relative max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] cursor-pointer select-none transition-transform active:scale-[0.98] ${
+                  m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"
+                }`}
+              >
+                {/* Quoted Message Header if it was a reply */}
+                {m.reply_quote && (
+                  <div className={`mb-1.5 p-2 rounded-2xl text-xs border-l-2 ${
+                    m.me ? 'bg-black/20 border-white/60 text-white/90' : 'bg-white/5 border-primary text-slate-300'
+                  }`}>
+                    <span className="font-bold block text-[10px] text-accent">{m.reply_quote.sender_name}</span>
+                    <span className="truncate block opacity-80">{m.reply_quote.content}</span>
+                  </div>
+                )}
+
+                {m.text}
+
+                <span className={`ml-2 inline-flex items-center gap-0.5 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                  {m.time}{m.me && <CheckCheck className="h-3 w-3" />}
+                </span>
+
+                {/* Attached Emoji Reaction Badges */}
+                {m.reactions && Object.keys(m.reactions).length > 0 && (
+                  <div className={`absolute -bottom-3 flex items-center gap-1 ${m.me ? 'right-2' : 'left-2'}`}>
+                    {Object.entries(m.reactions).map(([emoji, users]) => (
+                      <span 
+                        key={emoji}
+                        onClick={(e) => { e.stopPropagation(); toggleReaction(m.id, emoji); }}
+                        className="glass-strong text-[11px] px-2 py-0.5 rounded-full border border-white/20 shadow-md flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
+                      >
+                        <span>{emoji}</span>
+                        {users.length > 1 && <span className="text-[9px] font-bold text-white">{users.length}</span>}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            </div>
           ))}
         </AnimatePresence>
 
@@ -568,6 +697,22 @@ function ChatView({
           </motion.div>
         )}
       </div>
+
+      {/* Quoted Reply Banner */}
+      {replyingTo && (
+        <div className="glass mx-3 p-2.5 rounded-2xl flex items-center justify-between border-l-4 border-primary text-xs">
+          <div className="min-w-0 flex-1">
+            <span className="font-bold text-primary block text-[10px]">Replying to {replyingTo.sender_name}</span>
+            <span className="truncate block text-slate-300">{replyingTo.content}</span>
+          </div>
+          <button 
+            onClick={() => setReplyingTo(null)}
+            className="p-1 text-muted-foreground hover:text-white cursor-pointer ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 p-3 pb-6">
         <IconBtn label="Attach"><Plus className="h-5 w-5" /></IconBtn>
