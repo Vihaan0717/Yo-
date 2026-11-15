@@ -1086,6 +1086,7 @@ export function YoApp() {
   const [tab, setTab] = useState<Tab>("chats");
   const [open, setOpen] = useState<Chat | null>(null);
   const openRef = useRef<Chat | null>(null);
+  const seenMsgIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     openRef.current = open;
   }, [open]);
@@ -1203,6 +1204,16 @@ export function YoApp() {
       .on('broadcast', { event: 'new_msg' }, (payload: any) => {
         const msg = payload.payload;
         if (msg.sender_id !== user?.id) {
+          const msgIdStr = msg.id ? String(msg.id) : null;
+          if (msgIdStr && seenMsgIdsRef.current.has(msgIdStr)) return;
+          if (msgIdStr) {
+            seenMsgIdsRef.current.add(msgIdStr);
+            if (seenMsgIdsRef.current.size > 200) {
+              const first = seenMsgIdsRef.current.values().next().value;
+              if (first) seenMsgIdsRef.current.delete(first);
+            }
+          }
+
           const targetConvId = msg.conversation_id || 'shared-direct-room';
           const isCurrentlyReading = openRef.current?.id === targetConvId;
           const preview = msg.message_type === 'image' 
@@ -1247,6 +1258,16 @@ export function YoApp() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: any) => {
         const newMsg = payload.new;
         if (newMsg.sender_id !== user?.id) {
+          const msgIdStr = newMsg.id ? String(newMsg.id) : null;
+          if (msgIdStr && seenMsgIdsRef.current.has(msgIdStr)) return;
+          if (msgIdStr) {
+            seenMsgIdsRef.current.add(msgIdStr);
+            if (seenMsgIdsRef.current.size > 200) {
+              const first = seenMsgIdsRef.current.values().next().value;
+              if (first) seenMsgIdsRef.current.delete(first);
+            }
+          }
+
           const targetConvId = newMsg.conversation_id;
           const isCurrentlyReading = openRef.current?.id === targetConvId;
           const preview = newMsg.message_type === 'image' 
@@ -1308,6 +1329,7 @@ export function YoApp() {
       target_user_id: targetUser.id
     };
 
+    openRef.current = directChat;
     setOpen(directChat);
     setTab("chats");
     refreshConversations();
@@ -1380,6 +1402,7 @@ export function YoApp() {
                 <ChatsTab 
                   chatsList={chatsList} 
                   onOpen={(c) => {
+                    openRef.current = c;
                     // Reset unread on opening
                     setChatsList(prev => prev.map(item => item.id === c.id ? { ...item, unread: 0 } : item));
                     setOpen(c);
@@ -1425,6 +1448,7 @@ export function YoApp() {
               key={open.id} 
               chat={open} 
               onBack={() => {
+                openRef.current = null;
                 setOpen(null);
                 refreshConversations();
               }} 
