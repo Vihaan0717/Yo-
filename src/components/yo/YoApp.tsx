@@ -1508,6 +1508,12 @@ export function YoApp() {
 
           const targetConvId = msg.conversation_id || 'shared-direct-room';
           const isCurrentlyReading = openRef.current?.id === targetConvId;
+
+          // If message is real persisted ID, acknowledge delivery immediately on receiver device!
+          if (msg.id && typeof msg.id === 'string' && !msg.id.startsWith('cmsg_') && !msg.id.startsWith('msg-')) {
+            ReceiptService.acknowledgeDelivery(targetConvId, [msg.id]).then();
+          }
+
           const preview = msg.message_type === 'image' 
             ? '📷 Photo' 
             : (msg.message_type === 'audio' ? '🎤 Voice note' : (msg.content || 'New message'));
@@ -1562,6 +1568,10 @@ export function YoApp() {
 
           const targetConvId = newMsg.conversation_id;
           const isCurrentlyReading = openRef.current?.id === targetConvId;
+
+          // Acknowledge delivery to sender when receiver device detects incoming message!
+          ReceiptService.acknowledgeDelivery(targetConvId, [newMsg.id]).then();
+
           const preview = newMsg.message_type === 'image' 
             ? '📷 Photo' 
             : (newMsg.message_type === 'audio' ? '🎤 Voice message' : (newMsg.content || 'New message'));

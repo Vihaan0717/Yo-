@@ -11,6 +11,34 @@ export class ReceiptService {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return 0;
 
+    const notifyDelivery = () => {
+      // 1. Send via local conversation channel if provided
+      if (channel) {
+        channel.send({
+          type: 'broadcast',
+          event: 'delivery_receipt',
+          payload: {
+            conversation_id: conversationId,
+            message_ids: messageIds,
+            recipient_id: user.id,
+            delivered_at: new Date().toISOString()
+          }
+        });
+      }
+
+      // 2. Also send on room channel directly to reach active chat room
+      supabase.channel(`room_${conversationId}`).send({
+        type: 'broadcast',
+        event: 'delivery_receipt',
+        payload: {
+          conversation_id: conversationId,
+          message_ids: messageIds,
+          recipient_id: user.id,
+          delivered_at: new Date().toISOString()
+        }
+      });
+    };
+
     try {
       // 1. Try server RPC
       const { data, error } = await supabase.rpc('acknowledge_delivery', {
@@ -19,19 +47,7 @@ export class ReceiptService {
       });
 
       if (!error && typeof data === 'number') {
-        // Broadcast delivery receipt to conversation channel so sender updates ticks immediately
-        if (channel) {
-          channel.send({
-            type: 'broadcast',
-            event: 'delivery_receipt',
-            payload: {
-              conversation_id: conversationId,
-              message_ids: messageIds,
-              recipient_id: user.id,
-              delivered_at: new Date().toISOString()
-            }
-          });
-        }
+        notifyDelivery();
         return data;
       }
 
@@ -44,19 +60,7 @@ export class ReceiptService {
         }));
 
         await supabase.from('message_receipts').upsert(rows, { onConflict: 'message_id,user_id' });
-
-        if (channel) {
-          channel.send({
-            type: 'broadcast',
-            event: 'delivery_receipt',
-            payload: {
-              conversation_id: conversationId,
-              message_ids: messageIds,
-              recipient_id: user.id,
-              delivered_at: new Date().toISOString()
-            }
-          });
-        }
+        notifyDelivery();
         return messageIds.length;
       }
 
@@ -81,6 +85,31 @@ export class ReceiptService {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
 
+    const notifyRead = (actualSeq: number) => {
+      if (channel) {
+        channel.send({
+          type: 'broadcast',
+          event: 'read_receipt',
+          payload: {
+            conversation_id: conversationId,
+            reader_id: user.id,
+            read_sequence: actualSeq,
+            read_at: new Date().toISOString()
+          }
+        });
+      }
+      supabase.channel(`room_${conversationId}`).send({
+        type: 'broadcast',
+        event: 'read_receipt',
+        payload: {
+          conversation_id: conversationId,
+          reader_id: user.id,
+          read_sequence: actualSeq,
+          read_at: new Date().toISOString()
+        }
+      });
+    };
+
     try {
       // 1. Try server RPC
       const { data, error } = await supabase.rpc('acknowledge_conversation_read', {
@@ -89,18 +118,7 @@ export class ReceiptService {
       });
 
       if (!error && data) {
-        if (channel) {
-          channel.send({
-            type: 'broadcast',
-            event: 'read_receipt',
-            payload: {
-              conversation_id: conversationId,
-              reader_id: user.id,
-              read_sequence: data.current_sequence || maxSequence,
-              read_at: new Date().toISOString()
-            }
-          });
-        }
+        notifyRead(data.current_sequence || maxSequence);
         return true;
       }
 
@@ -111,18 +129,7 @@ export class ReceiptService {
           .update({ last_read_at: new Date().toISOString() })
           .match({ conversation_id: conversationId, user_id: user.id });
 
-        if (channel) {
-          channel.send({
-            type: 'broadcast',
-            event: 'read_receipt',
-            payload: {
-              conversation_id: conversationId,
-              reader_id: user.id,
-              read_sequence: maxSequence,
-              read_at: new Date().toISOString()
-            }
-          });
-        }
+        notifyRead(maxSequence);
         return true;
       }
 
