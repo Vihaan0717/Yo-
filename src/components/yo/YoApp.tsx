@@ -23,6 +23,8 @@ import {
   LogOut
 } from "lucide-react";
 import { Avatar } from "./Avatar";
+import { VoiceNoteBubble } from "./VoiceNoteBubble";
+import { VoiceRecorderService } from "../../services/voice/VoiceRecorderService";
 import { CallOverlay } from "../../features/calls/components/CallOverlay";
 import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
 import { AuthModal } from "../modals/AuthModal";
@@ -374,16 +376,22 @@ function ChatView({
     me: boolean; 
     text: string; 
     time: string;
+    message_type?: string;
+    audio_url?: string;
     reactions?: Record<string, string[]>;
     reply_quote?: { id: string; sender_name: string; content: string };
   }>>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
   const [isPeerTyping, setIsPeerTyping] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordDuration, setRecordDuration] = useState(0);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | number | null>(null);
   const [replyingTo, setReplyingTo] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const typingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
+  const recorderRef = useRef<VoiceRecorderService | null>(null);
+  const recordTimerRef = useRef<any>(null);
   const reactionOptions = ["❤️", "🔥", "😂", "👍", "😮", "🙏"];
 
   // Fetch real messages & listen to live broadcast and database changes
@@ -486,6 +494,90 @@ function ChatView({
       channelRef.current = null;
     };
   }, [chat.id, user?.id]);
+
+  const startVoiceRecording = async () => {
+    const rec = new VoiceRecorderService();
+    recorderRef.current = rec;
+    const ok = await rec.start();
+    if (ok) {
+      setIsRecording(true);
+      setRecordDuration(0);
+      recordTimerRef.current = setInterval(() => {
+        setRecordDuration((prev) => prev + 1);
+      }, 1000);
+    }
+  };
+
+  const stopAndSendVoiceRecording = async () => {
+    if (!recorderRef.current || !isRecording || !user) return;
+    clearInterval(recordTimerRef.current);
+    const audioBase64 = await recorderRef.current.stop();
+    setIsRecording(false);
+    recorderRef.current = null;
+
+    if (!audioBase64) return;
+
+    const nowTime = new Date().toTimeString().slice(0, 5);
+    const tempId = `voice-${Date.now()}`;
+    const newEntry = {
+      id: tempId,
+      me: true,
+      text: "Voice message",
+      message_type: 'audio',
+      audio_url: audioBase64,
+      time: nowTime,
+      reactions: {}
+    };
+
+    setMsgs((m) => [...m, newEntry]);
+
+    // Broadcast audio payload
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'new_msg',
+        payload: {
+          id: tempId,
+          conversation_id: chat.id,
+          sender_id: user.id,
+          content: "Voice message",
+          message_type: 'audio',
+          audio_url: audioBase64,
+          time: nowTime
+        }
+      });
+    }
+
+    supabase.channel('global_messages_listener').send({
+      type: 'broadcast',
+      event: 'new_msg',
+      payload: {
+        id: tempId,
+        conversation_id: chat.id,
+        sender_id: user.id,
+        content: "🎤 Voice message",
+        time: nowTime
+      }
+    });
+
+    // Save audio representation to messages table
+    await supabase.from('messages').insert({
+      conversation_id: chat.id,
+      sender_id: user.id,
+      content: audioBase64,
+      message_type: 'audio'
+    });
+  };
+
+  const cancelVoiceRecording = () => {
+    if (recorderRef.current) {
+      recorderRef.current.cancel();
+      recorderRef.current = null;
+    }
+    clearInterval(recordTimerRef.current);
+    setIsRecording(false);
+    setRecordDuration(0);
+  };
 
   const toggleReaction = (msgId: string | number, emoji: string) => {
     if (!user) return;
@@ -687,7 +779,12 @@ function ChatView({
                   </div>
                 )}
 
-                {m.text}
+                {/* Voice Note Audio or Text message */}
+                {m.message_type === 'audio' && m.audio_url ? (
+                  <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
+                ) : (
+                  <span>{m.text}</span>
+                )}
 
                 <span className={`ml-2 inline-flex items-center gap-0.5 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                   {m.time}{m.me && <CheckCheck className="h-3 w-3" />}
@@ -737,25 +834,52 @@ function ChatView({
       )}
 
       <div className="flex items-center gap-2 p-3 pb-6">
-        <IconBtn label="Attach"><Plus className="h-5 w-5" /></IconBtn>
-        <div className="glass flex flex-1 items-center rounded-full px-4 py-2.5">
-          <input 
-            value={text} 
-            onChange={(e) => handleInputChange(e.target.value)} 
-            onKeyDown={(e) => e.key === "Enter" && send()} 
-            placeholder="Message" 
-            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" 
-          />
-        </div>
+        {isRecording ? (
+          /* Live Recording Bar HUD */
+          <div className="flex-1 glass-strong rounded-full px-4 py-2.5 flex items-center justify-between border border-red-500/30 animate-pulse">
+            <div className="flex items-center gap-2 text-xs font-semibold text-red-400">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+              <span>Recording {recordDuration}s...</span>
+            </div>
+            <button
+              onClick={cancelVoiceRecording}
+              className="text-xs text-muted-foreground hover:text-white px-2 py-0.5 rounded-md hover:bg-white/10 transition cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <>
+            <IconBtn label="Attach"><Plus className="h-5 w-5" /></IconBtn>
+            <div className="glass flex flex-1 items-center rounded-full px-4 py-2.5">
+              <input 
+                value={text} 
+                onChange={(e) => handleInputChange(e.target.value)} 
+                onKeyDown={(e) => e.key === "Enter" && send()} 
+                placeholder="Message" 
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" 
+              />
+            </div>
+          </>
+        )}
+
         <motion.button 
           whileTap={{ scale: 0.8 }} 
-          onClick={send} 
-          aria-label="Send" 
-          className="bg-brand grid h-11 w-11 place-items-center rounded-full text-primary-foreground shadow-glow cursor-pointer"
+          onClick={text ? send : (isRecording ? stopAndSendVoiceRecording : startVoiceRecording)} 
+          aria-label={text ? "Send" : (isRecording ? "Stop and Send" : "Record Voice Note")} 
+          className={`grid h-11 w-11 place-items-center rounded-full text-primary-foreground shadow-glow cursor-pointer transition-colors ${
+            isRecording ? 'bg-red-500 shadow-red-500/40 text-white' : 'bg-brand'
+          }`}
         >
           <AnimatePresence mode="wait" initial={false}>
-            <motion.span key={text ? "s" : "m"} initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0, rotate: 45 }} transition={spring}>
-              {text ? <Send className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+            <motion.span 
+              key={text ? "send" : (isRecording ? "stop" : "mic")} 
+              initial={{ scale: 0, rotate: -45 }} 
+              animate={{ scale: 1, rotate: 0 }} 
+              exit={{ scale: 0, rotate: 45 }} 
+              transition={spring}
+            >
+              {text ? <Send className="h-5 w-5" /> : (isRecording ? <CheckCheck className="h-5 w-5" /> : <Mic className="h-5 w-5" />)}
             </motion.span>
           </AnimatePresence>
         </motion.button>
