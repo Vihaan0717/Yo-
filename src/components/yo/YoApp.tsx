@@ -373,7 +373,7 @@ function ChatView({
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // Fetch real messages & listen to live Supabase Realtime changes
+  // Fetch real messages & listen to live broadcast and database changes
   useEffect(() => {
     let channel: any = null;
 
@@ -395,9 +395,25 @@ function ChatView({
       }
       setLoading(false);
 
-      // Subscribe to live new incoming messages
-      channel = supabase
-        .channel(`chat:${chat.id}`)
+      // Subscribe with both Postgres changes AND instant Broadcast channel
+      channel = supabase.channel(`room_${chat.id}`);
+
+      channel
+        .on('broadcast', { event: 'new_msg' }, (payload: any) => {
+          const msg = payload.payload;
+          setMsgs((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: msg.id,
+                me: msg.sender_id === user?.id,
+                text: msg.content,
+                time: msg.time || new Date().toTimeString().slice(0, 5)
+              }
+            ];
+          });
+        })
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${chat.id}` },
@@ -432,16 +448,31 @@ function ChatView({
     const content = text.trim();
     setText("");
 
-    // Optimistic insert
-    const tempId = `temp-${Date.now()}`;
+    const nowTime = new Date().toTimeString().slice(0, 5);
+    const tempId = `msg-${Date.now()}`;
     const newEntry = {
       id: tempId,
       me: true,
       text: content,
-      time: new Date().toTimeString().slice(0, 5)
+      time: nowTime
     };
+
+    // 1. Instant local display
     setMsgs((m) => [...m, newEntry]);
 
+    // 2. Instant peer broadcast (low-latency WebSockets)
+    supabase.channel(`room_${chat.id}`).send({
+      type: 'broadcast',
+      event: 'new_msg',
+      payload: {
+        id: tempId,
+        sender_id: user.id,
+        content,
+        time: nowTime
+      }
+    });
+
+    // 3. Persistent PostgreSQL database insert
     const { error } = await supabase.from('messages').insert({
       conversation_id: chat.id,
       sender_id: user.id,
@@ -450,7 +481,7 @@ function ChatView({
     });
 
     if (error) {
-      console.error("Failed to send message to Supabase:", error);
+      console.warn("Database insert notice:", error);
     }
   };
 
