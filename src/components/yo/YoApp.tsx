@@ -100,6 +100,25 @@ function SearchBar({ placeholder = "Search", value = "", onChange }: { placehold
   );
 }
 
+const getLocalLastRead = (userId?: string, convId?: string): string | null => {
+  if (!userId || !convId) return null;
+  try {
+    return localStorage.getItem(`yo_read_${userId}_${convId}`);
+  } catch {
+    return null;
+  }
+};
+
+const setLocalLastRead = (userId?: string, convId?: string, timestamp?: string) => {
+  if (!userId || !convId) return;
+  try {
+    const val = timestamp || new Date().toISOString();
+    localStorage.setItem(`yo_read_${userId}_${convId}`, val);
+  } catch {
+    // ignore
+  }
+};
+
 function Typing() {
   return (
     <span className="flex items-center gap-1.5 text-sm font-medium text-[#2dd4bf]">
@@ -428,6 +447,13 @@ function ChatView({
             time: new Date(m.created_at).toTimeString().slice(0, 5)
           };
         }));
+
+        // WhatsApp read watermark: mark all existing messages read
+        const latestTime = data.length > 0 ? data[data.length - 1].created_at : new Date().toISOString();
+        setLocalLastRead(user?.id, chat.id, latestTime);
+        if (user && chat.id && chat.id !== 'shared-direct-room') {
+          supabase.rpc('mark_conversation_read', { target_conversation: chat.id }).then();
+        }
       }
       setLoading(false);
 
@@ -1135,20 +1161,37 @@ export function YoApp() {
           const handle = profile?.username ? `@${profile.username}` : "direct";
           const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
 
-          // Calculate real unread count from messages table
+          // WhatsApp read watermark logic:
           const isCurrentActive = openRef.current?.id === conv.id;
           let unreadCount = 0;
-          if (!isCurrentActive) {
-            let q = supabase
-              .from('messages')
-              .select('id', { count: 'exact', head: true })
-              .eq('conversation_id', conv.id)
-              .neq('sender_id', user.id);
-            if (item.last_read_at) {
-              q = q.gt('created_at', item.last_read_at);
+          if (isCurrentActive) {
+            unreadCount = 0;
+            setLocalLastRead(user.id, conv.id);
+          } else {
+            const localRead = getLocalLastRead(user.id, conv.id);
+            const dbRead = item.last_read_at;
+            let effectiveRead = localRead;
+            if (dbRead && (!localRead || new Date(dbRead) > new Date(localRead))) {
+              effectiveRead = dbRead;
             }
-            const { count } = await q;
-            unreadCount = count || 0;
+
+            if (effectiveRead) {
+              const { count } = await supabase
+                .from('messages')
+                .select('id', { count: 'exact', head: true })
+                .eq('conversation_id', conv.id)
+                .neq('sender_id', user.id)
+                .gt('created_at', effectiveRead);
+              unreadCount = count || 0;
+            } else {
+              // Never read this chat: count all incoming messages
+              const { count } = await supabase
+                .from('messages')
+                .select('id', { count: 'exact', head: true })
+                .eq('conversation_id', conv.id)
+                .neq('sender_id', user.id);
+              unreadCount = count || 0;
+            }
           }
 
           formatted.push({
@@ -1164,19 +1207,28 @@ export function YoApp() {
           });
         }
 
-        setChatsList((prev) => {
+        setChatsList(() => {
           return formatted.map((newChat) => {
-            const existing = prev.find((p) => p.id === newChat.id);
             const isActive = openRef.current?.id === newChat.id;
             if (isActive) return { ...newChat, unread: 0 };
-            const finalUnread = Math.max(newChat.unread, existing?.unread || 0);
-            return { ...newChat, unread: finalUnread };
+            return newChat;
           });
         });
       } else {
         const isActive = openRef.current?.id === "shared-direct-room";
-        setChatsList((prev) => {
-          const existing = prev.find((p) => p.id === "shared-direct-room");
+        const localRead = getLocalLastRead(user.id, "shared-direct-room");
+        let fallbackUnread = 0;
+        if (!isActive && localRead) {
+          const { count } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('conversation_id', 'shared-direct-room')
+            .neq('sender_id', user.id)
+            .gt('created_at', localRead);
+          fallbackUnread = count || 0;
+        }
+
+        setChatsList(() => {
           const defaultChat: Chat = {
             id: "shared-direct-room",
             name: "Yo Direct Chat",
@@ -1184,7 +1236,7 @@ export function YoApp() {
             hue: 200,
             last: "Tap here to chat across devices!",
             time: "Now",
-            unread: isActive ? 0 : (existing?.unread || 0),
+            unread: isActive ? 0 : fallbackUnread,
             online: true
           };
           return [defaultChat];
@@ -1403,10 +1455,12 @@ export function YoApp() {
                   chatsList={chatsList} 
                   onOpen={(c) => {
                     openRef.current = c;
+                    setLocalLastRead(user?.id, c.id);
                     // Reset unread on opening
                     setChatsList(prev => prev.map(item => item.id === c.id ? { ...item, unread: 0 } : item));
                     setOpen(c);
                     if (user && c.id && c.id !== 'shared-direct-room') {
+                      supabase.rpc('mark_conversation_read', { target_conversation: c.id }).then();
                       supabase
                         .from('conversation_members')
                         .update({ last_read_at: new Date().toISOString() })
@@ -1448,6 +1502,13 @@ export function YoApp() {
               key={open.id} 
               chat={open} 
               onBack={() => {
+                if (open) {
+                  setLocalLastRead(user?.id, open.id);
+                  setChatsList(prev => prev.map(item => item.id === open.id ? { ...item, unread: 0 } : item));
+                  if (user && open.id && open.id !== 'shared-direct-room') {
+                    supabase.rpc('mark_conversation_read', { target_conversation: open.id }).then();
+                  }
+                }
                 openRef.current = null;
                 setOpen(null);
                 refreshConversations();

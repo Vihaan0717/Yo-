@@ -193,6 +193,10 @@ CREATE POLICY "Members view conversations" ON public.conversations FOR SELECT TO
 CREATE POLICY "Members view conversation members" ON public.conversation_members FOR SELECT TO authenticated
   USING (public.is_conversation_member(conversation_id));
 
+CREATE POLICY "Members update conversation members" ON public.conversation_members FOR UPDATE TO authenticated
+  USING (user_id = (SELECT auth.uid()))
+  WITH CHECK (user_id = (SELECT auth.uid()));
+
 -- Messages
 CREATE POLICY "Members read messages" ON public.messages FOR SELECT TO authenticated
   USING (public.is_conversation_member(conversation_id));
@@ -268,4 +272,15 @@ BEGIN
   RETURN conv_id;
 END;
 $$;
+
+-- Helper RPC to mark conversation as read
+CREATE OR REPLACE FUNCTION public.mark_conversation_read(target_conversation UUID)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.conversation_members
+  SET last_read_at = now()
+  WHERE conversation_id = target_conversation
+    AND user_id = (SELECT auth.uid());
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
