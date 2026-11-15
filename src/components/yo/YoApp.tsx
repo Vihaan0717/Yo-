@@ -20,7 +20,8 @@ import {
   User, 
   ChevronRight, 
   CheckCheck,
-  LogOut
+  LogOut,
+  Reply
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -1170,70 +1171,94 @@ function ChatView({
                     )}
                   </AnimatePresence>
 
-                  <motion.div 
-                    layout 
-                    initial={{ opacity: 0, y: 12, scale: 0.95 }} 
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
-                    style={{ originX: m.me ? 1 : 0, originY: 1 }}
-                    onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
-                    className={`relative max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] cursor-pointer select-none transition-transform active:scale-[0.98] ${
-                      m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"
-                    }`}
-                  >
-                    {/* Quoted Message Header if it was a reply */}
-                    {m.reply_quote && (
-                      <div className={`mb-1.5 p-2 rounded-2xl text-xs border-l-2 ${
-                        m.me ? 'bg-black/20 border-white/60 text-white/90' : 'bg-white/5 border-primary text-slate-300'
-                      }`}>
-                        <span className="font-bold block text-[10px] text-accent">{m.reply_quote.sender_name}</span>
-                        <span className="truncate block opacity-80">{m.reply_quote.content}</span>
-                      </div>
-                    )}
+                  {/* Swipe-to-Reply Container */}
+                  <div className={`relative flex items-center w-full ${m.me ? 'justify-end' : 'justify-start'}`}>
+                    {/* Background Reply Icon Indicator that reveals on swipe */}
+                    <div 
+                      className={`absolute ${m.me ? 'right-full mr-2' : 'left-0 ml-1'} flex items-center justify-center w-8 h-8 rounded-full glass-strong text-primary pointer-events-none transition-opacity`}
+                    >
+                      <Reply className="w-4 h-4" />
+                    </div>
 
-                    {/* Voice Note Audio, Photo, or Text message */}
-                    {m.message_type === 'audio' && m.audio_url ? (
-                      <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
-                    ) : (m.message_type === 'image' || m.image_url || m.text?.startsWith('data:image')) ? (
-                      <ImageBubble 
-                        imageUrl={m.image_url || m.text} 
-                        isOwn={m.me} 
-                        onOpenLightbox={() => setLightboxImage({ 
-                          url: m.image_url || m.text, 
-                          sender: m.me ? 'You' : chat.name, 
-                          time: m.time 
-                        })} 
-                      />
-                    ) : (
-                      <span>{m.text}</span>
-                    )}
-
-                    <span className={`ml-2 inline-flex items-center gap-1 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                      {m.time}
-                      {m.me && (
-                        <MessageStatusIndicator 
-                          status={m.status || 'sent'} 
-                          onRetry={() => handleRetryMessage(m.client_message_id)} 
-                        />
+                    <motion.div 
+                      layout 
+                      drag="x"
+                      dragConstraints={{ left: 0, right: 65 }}
+                      dragElastic={0.25}
+                      onDragEnd={(_e, info) => {
+                        if (info.offset.x > 45) {
+                          setReplyingTo({
+                            id: String(m.id),
+                            sender_name: m.me ? 'You' : chat.name,
+                            content: (m.message_type === 'image' || m.text?.startsWith('data:image'))
+                              ? '📷 Photo'
+                              : (m.message_type === 'audio' ? '🎤 Voice note' : m.text)
+                          });
+                        }
+                      }}
+                      initial={{ opacity: 0, y: 12, scale: 0.95 }} 
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
+                      style={{ originX: m.me ? 1 : 0, originY: 1 }}
+                      onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
+                      className={`relative max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] cursor-pointer select-none transition-transform active:scale-[0.98] ${
+                        m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"
+                      }`}
+                    >
+                      {/* Quoted Message Header if it was a reply */}
+                      {m.reply_quote && (
+                        <div className={`mb-1.5 p-2 rounded-2xl text-xs border-l-2 ${
+                          m.me ? 'bg-black/20 border-white/60 text-white/90' : 'bg-white/5 border-primary text-slate-300'
+                        }`}>
+                          <span className="font-bold block text-[10px] text-accent">{m.reply_quote.sender_name}</span>
+                          <span className="truncate block opacity-80">{m.reply_quote.content}</span>
+                        </div>
                       )}
-                    </span>
 
-                    {/* Attached Emoji Reaction Badges */}
-                    {m.reactions && Object.keys(m.reactions).length > 0 && (
-                      <div className={`absolute -bottom-3 flex items-center gap-1 ${m.me ? 'right-2' : 'left-2'}`}>
-                        {Object.entries(m.reactions).map(([emoji, users]) => (
-                          <span 
-                            key={emoji}
-                            onClick={(e) => { e.stopPropagation(); toggleReaction(m.id, emoji); }}
-                            className="glass-strong text-[11px] px-2 py-0.5 rounded-full border border-white/20 shadow-md flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
-                          >
-                            <span>{emoji}</span>
-                            {users.length > 1 && <span className="text-[9px] font-bold text-white">{users.length}</span>}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </motion.div>
+                      {/* Voice Note Audio, Photo, or Text message */}
+                      {m.message_type === 'audio' && m.audio_url ? (
+                        <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
+                      ) : (m.message_type === 'image' || m.image_url || m.text?.startsWith('data:image')) ? (
+                        <ImageBubble 
+                          imageUrl={m.image_url || m.text} 
+                          isOwn={m.me} 
+                          onOpenLightbox={() => setLightboxImage({ 
+                            url: m.image_url || m.text, 
+                            sender: m.me ? 'You' : chat.name, 
+                            time: m.time 
+                          })} 
+                        />
+                      ) : (
+                        <span>{m.text}</span>
+                      )}
+
+                      <span className={`ml-2 inline-flex items-center gap-1 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                        {m.time}
+                        {m.me && (
+                          <MessageStatusIndicator 
+                            status={m.status || 'sent'} 
+                            onRetry={() => handleRetryMessage(m.client_message_id)} 
+                          />
+                        )}
+                      </span>
+
+                      {/* Attached Emoji Reaction Badges */}
+                      {m.reactions && Object.keys(m.reactions).length > 0 && (
+                        <div className={`absolute -bottom-3 flex items-center gap-1 ${m.me ? 'right-2' : 'left-2'}`}>
+                          {Object.entries(m.reactions).map(([emoji, users]) => (
+                            <span 
+                              key={emoji}
+                              onClick={(e) => { e.stopPropagation(); toggleReaction(m.id, emoji); }}
+                              className="glass-strong text-[11px] px-2 py-0.5 rounded-full border border-white/20 shadow-md flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
+                            >
+                              <span>{emoji}</span>
+                              {users.length > 1 && <span className="text-[9px] font-bold text-white">{users.length}</span>}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </motion.div>
+                  </div>
                 </div>
               </React.Fragment>
             );
