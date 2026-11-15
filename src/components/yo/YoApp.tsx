@@ -571,43 +571,60 @@ export function YoApp() {
       return;
     }
 
-    const { data: convMembers, error } = await supabase
-      .from('conversation_members')
-      .select('conversation_id, conversations(*)')
-      .eq('user_id', user.id);
+    try {
+      const { data: convMembers, error } = await supabase
+        .from('conversation_members')
+        .select('conversation_id, conversations(*)')
+        .eq('user_id', user.id);
 
-    if (!error && convMembers) {
-      const formatted: Chat[] = [];
-      for (const item of convMembers) {
-        const conv = item.conversations as any;
-        if (!conv) continue;
+      if (!error && convMembers && convMembers.length > 0) {
+        const formatted: Chat[] = [];
+        for (const item of convMembers) {
+          const conv = item.conversations as any;
+          if (!conv) continue;
 
-        // Fetch other participant profile
-        const { data: otherMember } = await supabase
-          .from('conversation_members')
-          .select('user_id, profiles(*)')
-          .eq('conversation_id', conv.id)
-          .neq('user_id', user.id)
-          .maybeSingle();
+          // Fetch other participant profile
+          const { data: otherMember } = await supabase
+            .from('conversation_members')
+            .select('user_id, profiles(*)')
+            .eq('conversation_id', conv.id)
+            .neq('user_id', user.id)
+            .maybeSingle();
 
-        const profile = (otherMember as any)?.profiles;
-        const name = profile?.display_name || conv.title || "Yo Conversation";
-        const handle = profile?.username ? `@${profile.username}` : "direct";
-        const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
+          const profile = (otherMember as any)?.profiles;
+          const name = profile?.display_name || conv.title || "Yo Direct Chat";
+          const handle = profile?.username ? `@${profile.username}` : "direct";
+          const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
 
-        formatted.push({
-          id: conv.id,
-          name,
-          handle,
-          hue,
-          last: conv.last_message_preview || "Conversation started",
-          time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
+          formatted.push({
+            id: conv.id,
+            name,
+            handle,
+            hue,
+            last: conv.last_message_preview || "Conversation started",
+            time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
+            unread: 0,
+            online: true,
+            target_user_id: profile?.id
+          });
+        }
+        setChatsList(formatted);
+      } else {
+        // Fallback for demo when no conversations are created yet
+        const defaultChat: Chat = {
+          id: "shared-direct-room",
+          name: "Yo Direct Chat",
+          handle: "@chat",
+          hue: 200,
+          last: "Tap here to chat across devices!",
+          time: "Now",
           unread: 0,
-          online: true,
-          target_user_id: profile?.id
-        });
+          online: true
+        };
+        setChatsList([defaultChat]);
       }
-      setChatsList(formatted);
+    } catch (e) {
+      console.warn("Failed to refresh conversations:", e);
     }
   };
 
