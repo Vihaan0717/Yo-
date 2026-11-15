@@ -45,6 +45,7 @@ import { CallOverlay } from "../../features/calls/components/CallOverlay";
 import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
 import { AuthModal } from "../modals/AuthModal";
 import { CreateGroupModal } from "../modals/CreateGroupModal";
+import { NotificationService } from "../../services/notifications/NotificationService";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../services/supabase/client";
 import type { CallSession, Profile } from "../../types";
@@ -359,7 +360,21 @@ function SettingsTab({ onOpenAuth }: { onOpenAuth: () => void }) {
   const rows = [
     { icon: User, label: "Account", hue: 210, action: onOpenAuth }, 
     { icon: Lock, label: "Privacy & Encryption", hue: 150 },
-    { icon: Bell, label: "Notifications", hue: 20, toggle: true }, 
+    { 
+      icon: Bell, 
+      label: "Notifications", 
+      hue: 20, 
+      toggle: true, 
+      action: async () => {
+        const ok = await NotificationService.requestPermission();
+        if (ok) {
+          NotificationService.showIncomingMessage({
+            title: "Yo!!! Notifications Active",
+            body: "You will receive alerts for new messages when Yo is running in background!"
+          }).then();
+        }
+      }
+    }, 
     { icon: Moon, label: "Dark glass", hue: 270, toggle: true },
   ];
 
@@ -1905,6 +1920,15 @@ export function YoApp() {
             : (msg.message_type === 'audio' ? '🎤 Voice note' : (msg.content || 'New message'));
           const timeStr = msg.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+          // Fire local notification if user is outside this chat or app is in background
+          if (!isCurrentlyReading) {
+            NotificationService.showIncomingMessage({
+              title: "Yo!!! Message",
+              body: preview,
+              conversationId: targetConvId
+            }).then();
+          }
+
           setChatsList((prev) => 
             prev.map((c) => {
               if (c.id === targetConvId || (!msg.conversation_id && c.id === 'shared-direct-room')) {
@@ -1962,6 +1986,15 @@ export function YoApp() {
             ? '📷 Photo' 
             : (newMsg.message_type === 'audio' ? '🎤 Voice message' : (newMsg.content || 'New message'));
           const timeStr = new Date(newMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+          // Fire local notification if user is outside this chat or app is in background
+          if (!isCurrentlyReading) {
+            NotificationService.showIncomingMessage({
+              title: "Yo!!! Message",
+              body: preview,
+              conversationId: targetConvId
+            }).then();
+          }
 
           setChatsList((prev) =>
             prev.map((c) => {
