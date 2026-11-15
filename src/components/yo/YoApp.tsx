@@ -20,7 +20,9 @@ import {
   User, 
   ChevronRight, 
   CheckCheck,
-  LogOut
+  LogOut,
+  Trash2,
+  Ban
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -413,6 +415,7 @@ function ChatView({
     sequence_number?: number;
     client_message_id?: string;
     created_at?: string;
+    deleted_for_everyone?: boolean;
   }>>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -478,6 +481,7 @@ function ChatView({
           const isImage = m.message_type === 'image' || (typeof m.content === 'string' && m.content.startsWith('data:image'));
           const isMe = m.sender_id === user?.id;
           const seq = m.sequence_number || (idx + 1);
+          const isDeleted = Boolean(m.deleted_for_everyone);
 
           // Calculate status for own messages
           let status: MessageStatus = 'sent';
@@ -489,7 +493,7 @@ function ChatView({
           }
 
           // Unread marker logic for incoming messages
-          if (!isMe) {
+          if (!isMe && !isDeleted) {
             const isUnread = localRead ? new Date(m.created_at) > new Date(localRead) : true;
             if (isUnread) {
               incomingUnreadCount++;
@@ -502,16 +506,17 @@ function ChatView({
           return {
             id: m.id,
             me: isMe,
-            text: isImage ? 'Photo' : (isAudio ? 'Voice message' : m.content),
-            message_type: isImage ? 'image' : (isAudio ? 'audio' : (m.message_type || 'text')),
-            audio_url: isAudio ? m.content : undefined,
-            image_url: isImage ? m.content : undefined,
-            reply_quote: m.reply_quote,
+            text: isDeleted ? '🚫 This message was deleted' : (isImage ? 'Photo' : (isAudio ? 'Voice message' : m.content)),
+            message_type: isDeleted ? 'system' : (isImage ? 'image' : (isAudio ? 'audio' : (m.message_type || 'text'))),
+            audio_url: isDeleted ? undefined : (isAudio ? m.content : undefined),
+            image_url: isDeleted ? undefined : (isImage ? m.content : undefined),
+            reply_quote: isDeleted ? undefined : m.reply_quote,
             time: new Date(m.created_at).toTimeString().slice(0, 5),
             status,
             sequence_number: seq,
             client_message_id: m.client_message_id,
-            created_at: m.created_at
+            created_at: m.created_at,
+            deleted_for_everyone: isDeleted
           };
         });
 
@@ -629,6 +634,25 @@ function ChatView({
             })
           );
         })
+        .on('broadcast', { event: 'message_deleted' }, (payload: any) => {
+          const { message_id } = payload.payload;
+          setMsgs((prev) =>
+            prev.map((m) => {
+              if (String(m.id) === String(message_id)) {
+                return {
+                  ...m,
+                  text: '🚫 This message was deleted',
+                  message_type: 'system',
+                  audio_url: undefined,
+                  image_url: undefined,
+                  reply_quote: undefined,
+                  deleted_for_everyone: true
+                };
+              }
+              return m;
+            })
+          );
+        })
         .on('broadcast', { event: 'typing' }, (payload: any) => {
           if (payload.payload?.sender_id !== user?.id) {
             setIsPeerTyping(true);
@@ -638,8 +662,33 @@ function ChatView({
         })
         .on(
           'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${chat.id}` },
+          { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${chat.id}` },
           (payload: any) => {
+            // Handle realtime UPDATE event (e.g., deleted_for_everyone)
+            if (payload.eventType === 'UPDATE') {
+              const updated = payload.new;
+              if (updated.deleted_for_everyone) {
+                setMsgs((prev) =>
+                  prev.map((m) => {
+                    if (String(m.id) === String(updated.id)) {
+                      return {
+                        ...m,
+                        text: '🚫 This message was deleted',
+                        message_type: 'system',
+                        audio_url: undefined,
+                        image_url: undefined,
+                        reply_quote: undefined,
+                        deleted_for_everyone: true
+                      };
+                    }
+                    return m;
+                  })
+                );
+              }
+              return;
+            }
+
+            if (payload.eventType !== 'INSERT') return;
             const newMsg = payload.new;
 
             // 1. If sent by current user, swap optimistic tempId with real DB id & mark sent
@@ -1086,6 +1135,53 @@ function ChatView({
     }
   };
 
+  const deleteMessageForMe = (msgId: string | number) => {
+    setActiveReactionMsgId(null);
+    setMsgs((prev) => prev.filter((m) => m.id !== msgId));
+  };
+
+  const deleteMessageForEveryone = async (msgId: string | number) => {
+    setActiveReactionMsgId(null);
+
+    // 1. Optimistic UI update
+    setMsgs((prev) =>
+      prev.map((m) => {
+        if (m.id === msgId) {
+          return {
+            ...m,
+            text: '🚫 This message was deleted',
+            message_type: 'system',
+            audio_url: undefined,
+            image_url: undefined,
+            reply_quote: undefined,
+            deleted_for_everyone: true
+          };
+        }
+        return m;
+      })
+    );
+
+    // 2. Broadcast to room channel so peer instantly retracts bubble
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'message_deleted',
+        payload: { conversation_id: chat.id, message_id: msgId }
+      });
+    }
+
+    // 3. Update database record
+    if (typeof msgId === 'string' && !msgId.startsWith('cmsg_') && !msgId.startsWith('msg-')) {
+      await supabase
+        .from('messages')
+        .update({
+          deleted_for_everyone: true,
+          content: 'This message was deleted'
+        })
+        .eq('id', msgId);
+    }
+  };
+
   return (
     <motion.div 
       initial={{ x: "100%" }} 
@@ -1166,6 +1262,24 @@ function ChatView({
                         >
                           Reply
                         </button>
+                        {/* Delete for Me button */}
+                        <button
+                          onClick={() => deleteMessageForMe(m.id)}
+                          title="Delete for me"
+                          className="text-xs text-slate-300 hover:text-white p-1 hover:bg-white/10 rounded cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Delete for Everyone button (own messages only) */}
+                        {m.me && !m.deleted_for_everyone && (
+                          <button
+                            onClick={() => deleteMessageForEveryone(m.id)}
+                            title="Delete for everyone"
+                            className="text-xs text-red-400 hover:text-red-300 p-1 hover:bg-red-500/20 rounded cursor-pointer"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -1194,7 +1308,9 @@ function ChatView({
                       style={{ originX: m.me ? 1 : 0, originY: 1 }}
                       onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
                       className={`relative max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] cursor-pointer select-none transition-transform active:scale-[0.98] ${
-                        m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"
+                        m.deleted_for_everyone
+                          ? 'glass-strong italic opacity-60 text-muted-foreground self-start'
+                          : (m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg")
                       }`}
                     >
                       {/* Quoted Message Header if it was a reply */}

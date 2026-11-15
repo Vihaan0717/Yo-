@@ -38,6 +38,7 @@ export interface EngineMessage {
   image_url?: string;
   delivered_at?: string | null;
   read_at?: string | null;
+  deleted_for_everyone?: boolean;
 }
 
 export interface OutboxItem {
