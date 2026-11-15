@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { 
   MessageCircle, 
@@ -26,6 +26,12 @@ import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
 import { ImageBubble } from "./ImageBubble";
 import { LightboxModal } from "./LightboxModal";
+import { MessageStatusIndicator } from "../../features/messaging/components/MessageStatusIndicator";
+import { DateSeparator, formatDateLabel } from "../../features/messaging/components/DateSeparator";
+import { UnreadSeparator } from "../../features/messaging/components/UnreadSeparator";
+import { MessageOutboxService } from "../../features/messaging/services/MessageOutboxService";
+import { ReceiptService } from "../../features/messaging/services/ReceiptService";
+import type { MessageStatus } from "../../features/messaging/types";
 import { ImageService } from "../../services/media/ImageService";
 import { VoiceRecorderService } from "../../services/voice/VoiceRecorderService";
 import { CallOverlay } from "../../features/calls/components/CallOverlay";
@@ -169,7 +175,7 @@ function ChatsTab({
                   {c.unread > 0 && (
                     <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...spring, delay: 0.2 }}
                       className="bg-brand grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-bold text-primary-foreground shadow-glow">
-                      {c.unread}
+                      {c.unread > 99 ? '99+' : c.unread}
                     </motion.span>
                   )}
                 </div>
@@ -403,6 +409,10 @@ function ChatView({
     image_url?: string;
     reactions?: Record<string, string[]>;
     reply_quote?: { id: string; sender_name: string; content: string };
+    status?: MessageStatus;
+    sequence_number?: number;
+    client_message_id?: string;
+    created_at?: string;
   }>>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -413,6 +423,8 @@ function ChatView({
   const [replyingTo, setReplyingTo] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; sender: string; time: string } | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [firstUnreadSequence, setFirstUnreadSequence] = useState<number | null>(null);
+  const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
@@ -433,24 +445,94 @@ function ChatView({
         .order('created_at', { ascending: true });
 
       if (!error && data) {
-        setMsgs(data.map((m: any) => {
+        // Fetch receipts for this conversation's messages
+        const msgIds = data.map((m: any) => m.id);
+        let receiptsMap: Record<string, { delivered_at?: string; read_at?: string }> = {};
+
+        if (msgIds.length > 0) {
+          const { data: receipts } = await supabase
+            .from('message_receipts')
+            .select('*')
+            .in('message_id', msgIds);
+
+          if (receipts) {
+            receipts.forEach((r: any) => {
+              if (r.user_id !== user?.id) {
+                // Receipt from recipient
+                receiptsMap[r.message_id] = {
+                  delivered_at: r.delivered_at,
+                  read_at: r.read_at
+                };
+              }
+            });
+          }
+        }
+
+        // Determine read cursor / unread separator position
+        const localRead = getLocalLastRead(user?.id, chat.id);
+        let firstUnreadSeq: number | null = null;
+        let incomingUnreadCount = 0;
+
+        const formatted = data.map((m: any, idx: number) => {
           const isAudio = m.message_type === 'audio' || (typeof m.content === 'string' && m.content.startsWith('data:audio'));
           const isImage = m.message_type === 'image' || (typeof m.content === 'string' && m.content.startsWith('data:image'));
+          const isMe = m.sender_id === user?.id;
+          const seq = m.sequence_number || (idx + 1);
+
+          // Calculate status for own messages
+          let status: MessageStatus = 'sent';
+          if (isMe) {
+            const r = receiptsMap[m.id];
+            if (r?.read_at) status = 'read';
+            else if (r?.delivered_at) status = 'delivered';
+            else status = 'sent';
+          }
+
+          // Unread marker logic for incoming messages
+          if (!isMe) {
+            const isUnread = localRead ? new Date(m.created_at) > new Date(localRead) : true;
+            if (isUnread) {
+              incomingUnreadCount++;
+              if (firstUnreadSeq === null) {
+                firstUnreadSeq = seq;
+              }
+            }
+          }
+
           return {
             id: m.id,
-            me: m.sender_id === user?.id,
+            me: isMe,
             text: isImage ? 'Photo' : (isAudio ? 'Voice message' : m.content),
             message_type: isImage ? 'image' : (isAudio ? 'audio' : (m.message_type || 'text')),
             audio_url: isAudio ? m.content : undefined,
             image_url: isImage ? m.content : undefined,
             reply_quote: m.reply_quote,
-            time: new Date(m.created_at).toTimeString().slice(0, 5)
+            time: new Date(m.created_at).toTimeString().slice(0, 5),
+            status,
+            sequence_number: seq,
+            client_message_id: m.client_message_id,
+            created_at: m.created_at
           };
-        }));
+        });
+
+        setMsgs(formatted);
+        if (incomingUnreadCount > 0 && firstUnreadSeq !== null) {
+          setFirstUnreadSequence(firstUnreadSeq);
+          setUnreadCountAtOpen(incomingUnreadCount);
+        }
 
         // WhatsApp read watermark: mark all existing messages read
         const latestTime = data.length > 0 ? data[data.length - 1].created_at : new Date().toISOString();
+        const maxSeq = data.length > 0 ? (data[data.length - 1].sequence_number || data.length) : 0;
         setLocalLastRead(user?.id, chat.id, latestTime);
+
+        // Acknowledge delivery & read via ReceiptService
+        const incomingIds = data.filter((m: any) => m.sender_id !== user?.id).map((m: any) => m.id);
+        if (incomingIds.length > 0) {
+          ReceiptService.acknowledgeDelivery(chat.id, incomingIds).then();
+          ReceiptService.acknowledgeConversationRead(chat.id, maxSeq).then();
+        }
+
         if (user && chat.id && chat.id !== 'shared-direct-room') {
           supabase.rpc('mark_conversation_read', { target_conversation: chat.id }).then();
         }
@@ -481,18 +563,52 @@ function ChatView({
                 audio_url: isAudio ? (msg.audio_url || msg.content) : undefined,
                 image_url: isImage ? (msg.image_url || msg.content) : undefined,
                 reply_quote: msg.reply_quote,
-                time: msg.time || new Date().toTimeString().slice(0, 5)
+                time: msg.time || new Date().toTimeString().slice(0, 5),
+                created_at: new Date().toISOString(),
+                sequence_number: msg.sequence_number || (prev.length + 1)
               }
             ];
           });
 
-          // Mark as read in DB since user is actively viewing this room
+          // Acknowledge delivery and read immediately since user is actively viewing this room
+          if (msg.id && typeof msg.id === 'string' && !msg.id.startsWith('msg-')) {
+            ReceiptService.acknowledgeDelivery(chat.id, [msg.id], channelRef.current).then();
+            ReceiptService.acknowledgeConversationRead(chat.id, msg.sequence_number || 999999, channelRef.current).then();
+          }
+
           if (user && chat.id) {
+            setLocalLastRead(user.id, chat.id);
             supabase
               .from('conversation_members')
               .update({ last_read_at: new Date().toISOString() })
               .match({ conversation_id: chat.id, user_id: user.id })
               .then();
+          }
+        })
+        .on('broadcast', { event: 'delivery_receipt' }, (payload: any) => {
+          const { message_ids } = payload.payload;
+          if (Array.isArray(message_ids)) {
+            setMsgs((prev) =>
+              prev.map((m) => {
+                if (m.me && message_ids.includes(String(m.id)) && m.status !== 'read') {
+                  return { ...m, status: 'delivered' };
+                }
+                return m;
+              })
+            );
+          }
+        })
+        .on('broadcast', { event: 'read_receipt' }, (payload: any) => {
+          const { read_sequence, reader_id } = payload.payload;
+          if (reader_id !== user?.id) {
+            setMsgs((prev) =>
+              prev.map((m) => {
+                if (m.me && (!read_sequence || (m.sequence_number && m.sequence_number <= read_sequence))) {
+                  return { ...m, status: 'read' };
+                }
+                return m;
+              })
+            );
           }
         })
         .on('broadcast', { event: 'reaction_update' }, (payload: any) => {
@@ -526,7 +642,7 @@ function ChatView({
           (payload: any) => {
             const newMsg = payload.new;
 
-            // 1. If sent by current user, swap optimistic tempId with real DB id — NEVER duplicate!
+            // 1. If sent by current user, swap optimistic tempId with real DB id & mark sent
             if (newMsg.sender_id === user?.id) {
               setMsgs((prev) => {
                 if (prev.some((m) => m.id === newMsg.id)) return prev;
@@ -536,9 +652,10 @@ function ChatView({
                     !replaced &&
                     m.me &&
                     typeof m.id === 'string' &&
-                    (m.id.startsWith('msg-') || m.id.startsWith('img-') || m.id.startsWith('voice-'))
+                    (m.id.startsWith('msg-') || m.id.startsWith('img-') || m.id.startsWith('voice-') || m.id.startsWith('cmsg_'))
                   ) {
                     const matches =
+                      (m.client_message_id && m.client_message_id === newMsg.client_message_id) ||
                       (m.image_url && m.image_url === newMsg.content) ||
                       (m.audio_url && m.audio_url === newMsg.content) ||
                       (m.text === newMsg.content) ||
@@ -546,7 +663,13 @@ function ChatView({
                       (newMsg.message_type === 'audio' && m.message_type === 'audio');
                     if (matches) {
                       replaced = true;
-                      return { ...m, id: newMsg.id };
+                      const nextStatus: MessageStatus = m.status === 'read' ? 'read' : (m.status === 'delivered' ? 'delivered' : 'sent');
+                      return { 
+                        ...m, 
+                        id: newMsg.id, 
+                        sequence_number: newMsg.sequence_number,
+                        status: nextStatus 
+                      };
                     }
                   }
                   return m;
@@ -556,8 +679,12 @@ function ChatView({
               return;
             }
 
-            // 2. If sent by peer, mark as read in DB and append only if not already received via broadcast
+            // 2. If sent by peer, acknowledge delivery and read immediately
+            ReceiptService.acknowledgeDelivery(chat.id, [newMsg.id], channelRef.current).then();
+            ReceiptService.acknowledgeConversationRead(chat.id, newMsg.sequence_number || 999999, channelRef.current).then();
+
             if (user && chat.id) {
+              setLocalLastRead(user.id, chat.id);
               supabase
                 .from('conversation_members')
                 .update({ last_read_at: new Date().toISOString() })
@@ -581,10 +708,32 @@ function ChatView({
                   message_type: isImage ? 'image' : (isAudio ? 'audio' : (newMsg.message_type || 'text')),
                   audio_url: isAudio ? newMsg.content : undefined,
                   image_url: isImage ? newMsg.content : undefined,
-                  time: new Date(newMsg.created_at).toTimeString().slice(0, 5)
+                  time: new Date(newMsg.created_at).toTimeString().slice(0, 5),
+                  sequence_number: newMsg.sequence_number,
+                  created_at: newMsg.created_at
                 }
               ];
             });
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'message_receipts' },
+          (payload: any) => {
+            const receipt = payload.new;
+            if (!receipt || receipt.user_id === user?.id) return;
+
+            setMsgs((prev) =>
+              prev.map((m) => {
+                if (m.me && String(m.id) === String(receipt.message_id)) {
+                  let newStatus: MessageStatus = m.status || 'sent';
+                  if (receipt.read_at) newStatus = 'read';
+                  else if (receipt.delivered_at && newStatus !== 'read') newStatus = 'delivered';
+                  return { ...m, status: newStatus };
+                }
+                return m;
+              })
+            );
           }
         )
         .subscribe();
@@ -621,29 +770,32 @@ function ChatView({
     if (!audioBase64) return;
 
     const nowTime = new Date().toTimeString().slice(0, 5);
-    const tempId = `voice-${Date.now()}`;
+    const clientMessageId = MessageOutboxService.generateClientId();
     const newEntry = {
-      id: tempId,
+      id: clientMessageId,
+      client_message_id: clientMessageId,
       me: true,
       text: "Voice message",
       message_type: 'audio',
       audio_url: audioBase64,
       time: nowTime,
-      reactions: {}
+      status: 'sending' as MessageStatus,
+      reactions: {},
+      created_at: new Date().toISOString()
     };
 
     setMsgs((m) => [...m, newEntry]);
 
-    // Broadcast audio payload
+    // Broadcast audio payload to conversation channel
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
         event: 'new_msg',
         payload: {
-          id: tempId,
+          id: clientMessageId,
           conversation_id: chat.id,
           sender_id: user.id,
-          content: "Voice message",
+          content: audioBase64,
           message_type: 'audio',
           audio_url: audioBase64,
           time: nowTime
@@ -655,21 +807,36 @@ function ChatView({
       type: 'broadcast',
       event: 'new_msg',
       payload: {
-        id: tempId,
+        id: clientMessageId,
         conversation_id: chat.id,
         sender_id: user.id,
         content: "🎤 Voice message",
+        message_type: 'audio',
         time: nowTime
       }
     });
 
-    // Save audio representation to messages table
-    await supabase.from('messages').insert({
-      conversation_id: chat.id,
-      sender_id: user.id,
+    // Send through persistent MessageOutboxService
+    const result = await MessageOutboxService.send({
+      conversationId: chat.id,
+      senderId: user.id,
       content: audioBase64,
-      message_type: 'audio'
+      messageType: 'audio'
     });
+
+    if (result.message) {
+      setMsgs((prev) =>
+        prev.map((m) =>
+          m.id === clientMessageId
+            ? { ...m, id: result.message!.id, status: 'sent', sequence_number: result.message!.sequence_number }
+            : m
+        )
+      );
+    } else {
+      setMsgs((prev) =>
+        prev.map((m) => (m.id === clientMessageId ? { ...m, status: 'failed' } : m))
+      );
+    }
   };
 
   const cancelVoiceRecording = () => {
@@ -691,19 +858,22 @@ function ChatView({
     try {
       const processed = await ImageService.processImageFile(file, 1280, 0.78);
       const nowTime = new Date().toTimeString().slice(0, 5);
-      const tempId = `img-${Date.now()}`;
+      const clientMessageId = MessageOutboxService.generateClientId();
       const currentReply = replyingTo;
       setReplyingTo(null);
 
       const newEntry = {
-        id: tempId,
+        id: clientMessageId,
+        client_message_id: clientMessageId,
         me: true,
         text: "Photo",
         message_type: 'image',
         image_url: processed.dataUrl,
         time: nowTime,
+        status: 'sending' as MessageStatus,
         reply_quote: currentReply || undefined,
-        reactions: {}
+        reactions: {},
+        created_at: new Date().toISOString()
       };
 
       // 1. Instant local optimistic display
@@ -715,7 +885,7 @@ function ChatView({
           type: 'broadcast',
           event: 'new_msg',
           payload: {
-            id: tempId,
+            id: clientMessageId,
             conversation_id: chat.id,
             sender_id: user.id,
             content: processed.dataUrl,
@@ -732,22 +902,37 @@ function ChatView({
         type: 'broadcast',
         event: 'new_msg',
         payload: {
-          id: tempId,
+          id: clientMessageId,
           conversation_id: chat.id,
           sender_id: user.id,
           content: "📷 Photo",
+          message_type: 'image',
           time: nowTime
         }
       });
 
-      // 4. Supabase DB persistence
-      await supabase.from('messages').insert({
-        conversation_id: chat.id,
-        sender_id: user.id,
+      // 4. Send through persistent MessageOutboxService
+      const result = await MessageOutboxService.send({
+        conversationId: chat.id,
+        senderId: user.id,
         content: processed.dataUrl,
-        message_type: 'image',
-        reply_to: currentReply?.id || null
+        messageType: 'image',
+        replyTo: currentReply?.id
       });
+
+      if (result.message) {
+        setMsgs((prev) =>
+          prev.map((m) =>
+            m.id === clientMessageId
+              ? { ...m, id: result.message!.id, status: 'sent', sequence_number: result.message!.sequence_number }
+              : m
+          )
+        );
+      } else {
+        setMsgs((prev) =>
+          prev.map((m) => (m.id === clientMessageId ? { ...m, status: 'failed' } : m))
+        );
+      }
     } catch (err) {
       console.error("Failed to process image:", err);
     } finally {
@@ -811,17 +996,20 @@ function ChatView({
     setReplyingTo(null);
 
     const nowTime = new Date().toTimeString().slice(0, 5);
-    const tempId = `msg-${Date.now()}`;
+    const clientMessageId = MessageOutboxService.generateClientId();
     const newEntry = {
-      id: tempId,
+      id: clientMessageId,
+      client_message_id: clientMessageId,
       me: true,
       text: content,
       time: nowTime,
+      status: 'sending' as MessageStatus,
       reply_quote: currentReply || undefined,
-      reactions: {}
+      reactions: {},
+      created_at: new Date().toISOString()
     };
 
-    // 1. Instant local display (Single message)
+    // 1. Instant local display with 'sending' status
     setMsgs((m) => [...m, newEntry]);
 
     // 2. Broadcast to other peer (Send to both specific room AND global listener)
@@ -830,7 +1018,7 @@ function ChatView({
         type: 'broadcast',
         event: 'new_msg',
         payload: {
-          id: tempId,
+          id: clientMessageId,
           conversation_id: chat.id,
           sender_id: user.id,
           content,
@@ -845,7 +1033,7 @@ function ChatView({
       type: 'broadcast',
       event: 'new_msg',
       payload: {
-        id: tempId,
+        id: clientMessageId,
         conversation_id: chat.id,
         sender_id: user.id,
         content,
@@ -853,16 +1041,48 @@ function ChatView({
       }
     });
 
-    // 3. Persistent PostgreSQL database insert
-    const { error } = await supabase.from('messages').insert({
-      conversation_id: chat.id,
-      sender_id: user.id,
+    // 3. Dispatch through persistent MessageOutboxService (idempotent, offline retry)
+    const result = await MessageOutboxService.send({
+      conversationId: chat.id,
+      senderId: user.id,
       content,
-      message_type: 'text'
+      messageType: 'text',
+      replyTo: currentReply?.id
     });
 
-    if (error) {
-      console.warn("Database insert notice:", error);
+    if (result.message) {
+      setMsgs((prev) =>
+        prev.map((m) =>
+          m.id === clientMessageId
+            ? { ...m, id: result.message!.id, status: 'sent', sequence_number: result.message!.sequence_number }
+            : m
+        )
+      );
+    } else {
+      setMsgs((prev) =>
+        prev.map((m) => (m.id === clientMessageId ? { ...m, status: 'failed' } : m))
+      );
+    }
+  };
+
+  const handleRetryMessage = async (clientMessageId?: string) => {
+    if (!clientMessageId) return;
+    setMsgs((prev) =>
+      prev.map((m) => (m.client_message_id === clientMessageId ? { ...m, status: 'sending' } : m))
+    );
+    const result = await MessageOutboxService.retry(clientMessageId);
+    if (result.message) {
+      setMsgs((prev) =>
+        prev.map((m) =>
+          m.client_message_id === clientMessageId
+            ? { ...m, id: result.message!.id, status: 'sent', sequence_number: result.message!.sequence_number }
+            : m
+        )
+      );
+    } else {
+      setMsgs((prev) =>
+        prev.map((m) => (m.client_message_id === clientMessageId ? { ...m, status: 'failed' } : m))
+      );
     }
   };
 
@@ -895,109 +1115,129 @@ function ChatView({
       </div>
 
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-4">
-        <div className="glass mx-auto rounded-full px-3 py-1 text-[11px] text-muted-foreground">Today</div>
         {loading && msgs.length === 0 ? (
           <div className="text-center py-6 text-xs text-muted-foreground animate-pulse">Loading live conversation...</div>
         ) : null}
         
         <AnimatePresence initial={false}>
-          {msgs.map((m, i) => (
-            <div key={m.id} className="relative flex flex-col group">
-              {/* Floating Reaction Pill Picker on Tap/Long-Press */}
-              <AnimatePresence>
-                {activeReactionMsgId === m.id && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.8, y: 10 }}
-                    transition={spring}
-                    className={`absolute -top-12 z-40 glass-strong flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-2xl border border-white/20 ${
-                      m.me ? 'right-2' : 'left-2'
+          {msgs.map((m, i) => {
+            const prevMsg = i > 0 ? msgs[i - 1] : null;
+            const showDate = !prevMsg || (m.created_at && prevMsg.created_at && formatDateLabel(m.created_at) !== formatDateLabel(prevMsg.created_at));
+            const showUnreadMarker = firstUnreadSequence !== null && m.sequence_number === firstUnreadSequence && !m.me;
+
+            return (
+              <React.Fragment key={m.id}>
+                {showDate && m.created_at && (
+                  <DateSeparator timestamp={m.created_at} />
+                )}
+                {showUnreadMarker && (
+                  <UnreadSeparator count={unreadCountAtOpen} />
+                )}
+
+                <div className="relative flex flex-col group">
+                  {/* Floating Reaction Pill Picker on Tap/Long-Press */}
+                  <AnimatePresence>
+                    {activeReactionMsgId === m.id && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, y: 10 }}
+                        transition={spring}
+                        className={`absolute -top-12 z-40 glass-strong flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-2xl border border-white/20 ${
+                          m.me ? 'right-2' : 'left-2'
+                        }`}
+                      >
+                        {reactionOptions.map((emoji) => (
+                          <button
+                            key={emoji}
+                            onClick={() => toggleReaction(m.id, emoji)}
+                            className="text-base hover:scale-130 active:scale-95 transition-transform cursor-pointer p-0.5"
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setReplyingTo({ 
+                            id: String(m.id), 
+                            sender_name: m.me ? 'You' : chat.name, 
+                            content: (m.message_type === 'image' || m.text?.startsWith('data:image')) ? '📷 Photo' : (m.message_type === 'audio' ? '🎤 Voice note' : m.text) 
+                          })}
+                          className="text-xs text-primary font-bold ml-1 pl-1.5 border-l border-white/20 hover:underline cursor-pointer"
+                        >
+                          Reply
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <motion.div 
+                    layout 
+                    initial={{ opacity: 0, y: 12, scale: 0.95 }} 
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
+                    style={{ originX: m.me ? 1 : 0, originY: 1 }}
+                    onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
+                    className={`relative max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] cursor-pointer select-none transition-transform active:scale-[0.98] ${
+                      m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"
                     }`}
                   >
-                    {reactionOptions.map((emoji) => (
-                      <button
-                        key={emoji}
-                        onClick={() => toggleReaction(m.id, emoji)}
-                        className="text-base hover:scale-130 active:scale-95 transition-transform cursor-pointer p-0.5"
-                      >
-                        {emoji}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => setReplyingTo({ 
-                        id: String(m.id), 
-                        sender_name: m.me ? 'You' : chat.name, 
-                        content: (m.message_type === 'image' || m.text?.startsWith('data:image')) ? '📷 Photo' : (m.message_type === 'audio' ? '🎤 Voice note' : m.text) 
-                      })}
-                      className="text-xs text-primary font-bold ml-1 pl-1.5 border-l border-white/20 hover:underline cursor-pointer"
-                    >
-                      Reply
-                    </button>
+                    {/* Quoted Message Header if it was a reply */}
+                    {m.reply_quote && (
+                      <div className={`mb-1.5 p-2 rounded-2xl text-xs border-l-2 ${
+                        m.me ? 'bg-black/20 border-white/60 text-white/90' : 'bg-white/5 border-primary text-slate-300'
+                      }`}>
+                        <span className="font-bold block text-[10px] text-accent">{m.reply_quote.sender_name}</span>
+                        <span className="truncate block opacity-80">{m.reply_quote.content}</span>
+                      </div>
+                    )}
+
+                    {/* Voice Note Audio, Photo, or Text message */}
+                    {m.message_type === 'audio' && m.audio_url ? (
+                      <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
+                    ) : (m.message_type === 'image' || m.image_url || m.text?.startsWith('data:image')) ? (
+                      <ImageBubble 
+                        imageUrl={m.image_url || m.text} 
+                        isOwn={m.me} 
+                        onOpenLightbox={() => setLightboxImage({ 
+                          url: m.image_url || m.text, 
+                          sender: m.me ? 'You' : chat.name, 
+                          time: m.time 
+                        })} 
+                      />
+                    ) : (
+                      <span>{m.text}</span>
+                    )}
+
+                    <span className={`ml-2 inline-flex items-center gap-1 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                      {m.time}
+                      {m.me && (
+                        <MessageStatusIndicator 
+                          status={m.status || 'sent'} 
+                          onRetry={() => handleRetryMessage(m.client_message_id)} 
+                        />
+                      )}
+                    </span>
+
+                    {/* Attached Emoji Reaction Badges */}
+                    {m.reactions && Object.keys(m.reactions).length > 0 && (
+                      <div className={`absolute -bottom-3 flex items-center gap-1 ${m.me ? 'right-2' : 'left-2'}`}>
+                        {Object.entries(m.reactions).map(([emoji, users]) => (
+                          <span 
+                            key={emoji}
+                            onClick={(e) => { e.stopPropagation(); toggleReaction(m.id, emoji); }}
+                            className="glass-strong text-[11px] px-2 py-0.5 rounded-full border border-white/20 shadow-md flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
+                          >
+                            <span>{emoji}</span>
+                            {users.length > 1 && <span className="text-[9px] font-bold text-white">{users.length}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </motion.div>
-                )}
-              </AnimatePresence>
-
-              <motion.div 
-                layout 
-                initial={{ opacity: 0, y: 12, scale: 0.95 }} 
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
-                style={{ originX: m.me ? 1 : 0, originY: 1 }}
-                onClick={() => setActiveReactionMsgId(activeReactionMsgId === m.id ? null : m.id)}
-                className={`relative max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] cursor-pointer select-none transition-transform active:scale-[0.98] ${
-                  m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"
-                }`}
-              >
-                {/* Quoted Message Header if it was a reply */}
-                {m.reply_quote && (
-                  <div className={`mb-1.5 p-2 rounded-2xl text-xs border-l-2 ${
-                    m.me ? 'bg-black/20 border-white/60 text-white/90' : 'bg-white/5 border-primary text-slate-300'
-                  }`}>
-                    <span className="font-bold block text-[10px] text-accent">{m.reply_quote.sender_name}</span>
-                    <span className="truncate block opacity-80">{m.reply_quote.content}</span>
-                  </div>
-                )}
-
-                {/* Voice Note Audio, Photo, or Text message */}
-                {m.message_type === 'audio' && m.audio_url ? (
-                  <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
-                ) : (m.message_type === 'image' || m.image_url || m.text?.startsWith('data:image')) ? (
-                  <ImageBubble 
-                    imageUrl={m.image_url || m.text} 
-                    isOwn={m.me} 
-                    onOpenLightbox={() => setLightboxImage({ 
-                      url: m.image_url || m.text, 
-                      sender: m.me ? 'You' : chat.name, 
-                      time: m.time 
-                    })} 
-                  />
-                ) : (
-                  <span>{m.text}</span>
-                )}
-
-                <span className={`ml-2 inline-flex items-center gap-0.5 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
-                  {m.time}{m.me && <CheckCheck className="h-3 w-3" />}
-                </span>
-
-                {/* Attached Emoji Reaction Badges */}
-                {m.reactions && Object.keys(m.reactions).length > 0 && (
-                  <div className={`absolute -bottom-3 flex items-center gap-1 ${m.me ? 'right-2' : 'left-2'}`}>
-                    {Object.entries(m.reactions).map(([emoji, users]) => (
-                      <span 
-                        key={emoji}
-                        onClick={(e) => { e.stopPropagation(); toggleReaction(m.id, emoji); }}
-                        className="glass-strong text-[11px] px-2 py-0.5 rounded-full border border-white/20 shadow-md flex items-center gap-1 cursor-pointer hover:scale-110 transition-transform"
-                      >
-                        <span>{emoji}</span>
-                        {users.length > 1 && <span className="text-[9px] font-bold text-white">{users.length}</span>}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
-            </div>
-          ))}
+                </div>
+              </React.Fragment>
+            );
+          })}
         </AnimatePresence>
 
         {isPeerTyping && (
