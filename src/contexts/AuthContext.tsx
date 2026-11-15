@@ -37,14 +37,15 @@ export const DEMO_USER_2: Profile = {
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<Profile | null>(DEMO_USER_1);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [user, setUser] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [isDemoMode, setIsDemoMode] = useState<boolean>(!isSupabaseConfigured);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
       setIsDemoMode(true);
-      setUser(DEMO_USER_1);
+      setUser(null);
+      setLoading(false);
       return;
     }
 
