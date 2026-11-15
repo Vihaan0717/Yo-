@@ -518,11 +518,19 @@ function ChatView({
 
   const handleInputChange = (val: string) => {
     setText(val);
-    if (channelRef.current && user) {
-      channelRef.current.send({
+    // Broadcast typing to room channel AND global channel
+    if (user) {
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { sender_id: user.id, conversation_id: chat.id }
+        });
+      }
+      supabase.channel('global_messages_listener').send({
         type: 'broadcast',
         event: 'typing',
-        payload: { sender_id: user.id }
+        payload: { sender_id: user.id, conversation_id: chat.id }
       });
     }
   };
@@ -548,13 +556,14 @@ function ChatView({
     // 1. Instant local display (Single message)
     setMsgs((m) => [...m, newEntry]);
 
-    // 2. Broadcast to other peer
+    // 2. Broadcast to other peer (Send to both specific room AND global listener)
     if (channelRef.current) {
       channelRef.current.send({
         type: 'broadcast',
         event: 'new_msg',
         payload: {
           id: tempId,
+          conversation_id: chat.id,
           sender_id: user.id,
           content,
           time: nowTime,
@@ -562,6 +571,19 @@ function ChatView({
         }
       });
     }
+
+    // Also notify global channel so recipient outside the chat room gets badge
+    supabase.channel('global_messages_listener').send({
+      type: 'broadcast',
+      event: 'new_msg',
+      payload: {
+        id: tempId,
+        conversation_id: chat.id,
+        sender_id: user.id,
+        content,
+        time: nowTime
+      }
+    });
 
     // 3. Persistent PostgreSQL database insert
     const { error } = await supabase.from('messages').insert({
@@ -829,7 +851,7 @@ export function YoApp() {
   useEffect(() => {
     refreshConversations();
 
-    // Global listener for new messages when user is on the chat list to update badge count
+    // Global listener for new messages & typing when user is on the chat list to update badge count and typing state
     const globalChannel = supabase
       .channel('global_messages_listener')
       .on('broadcast', { event: 'new_msg' }, (payload: any) => {
@@ -837,10 +859,29 @@ export function YoApp() {
         if (msg.sender_id !== user?.id) {
           setChatsList((prev) => 
             prev.map((c) => {
-              if (open?.id === c.id) return { ...c, last: msg.content, time: msg.time };
-              return { ...c, last: msg.content, time: msg.time, unread: (c.unread || 0) + 1 };
+              // If already reading this chat, update preview without incrementing unread
+              if (open?.id === c.id) return { ...c, last: msg.content, time: msg.time, typing: false };
+              return { ...c, last: msg.content, time: msg.time, unread: (c.unread || 0) + 1, typing: false };
             })
           );
+        }
+      })
+      .on('broadcast', { event: 'typing' }, (payload: any) => {
+        const { sender_id, conversation_id } = payload.payload;
+        if (sender_id !== user?.id) {
+          setChatsList((prev) =>
+            prev.map((c) => {
+              if (c.id === conversation_id || (conversation_id === 'shared-direct-room')) {
+                return { ...c, typing: true };
+              }
+              return c;
+            })
+          );
+          setTimeout(() => {
+            setChatsList((prev) =>
+              prev.map((c) => (c.id === conversation_id ? { ...c, typing: false } : c))
+            );
+          }, 2500);
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
