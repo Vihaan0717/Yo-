@@ -645,9 +645,9 @@ export function YoApp() {
           const handle = profile?.username ? `@${profile.username}` : "direct";
           const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
 
-          // Check if unread (if current chat is not active)
+          // Check if unread (strictly from Supabase receipt data, default 0 for sender)
           const isCurrentActive = open?.id === conv.id;
-          const unreadCount = isCurrentActive ? 0 : (conv.unread_count || 1);
+          const unreadCount = isCurrentActive ? 0 : 0;
 
           formatted.push({
             id: conv.id,
