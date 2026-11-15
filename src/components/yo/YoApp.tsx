@@ -25,7 +25,9 @@ import {
   Ban,
   ChevronUp,
   ChevronDown,
-  X
+  X,
+  Pin,
+  PinOff
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -431,6 +433,7 @@ function ChatView({
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [firstUnreadSequence, setFirstUnreadSequence] = useState<number | null>(null);
   const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
+  const [pinnedMessage, setPinnedMessage] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchIndex, setSearchMatchIndex] = useState(0);
@@ -708,6 +711,10 @@ function ChatView({
               return m;
             })
           );
+        })
+        .on('broadcast', { event: 'pin_update' }, (payload: any) => {
+          const { pinned } = payload.payload;
+          setPinnedMessage(pinned || null);
         })
         .on('broadcast', { event: 'typing' }, (payload: any) => {
           if (payload.payload?.sender_id !== user?.id) {
@@ -1238,6 +1245,22 @@ function ChatView({
     }
   };
 
+  const togglePinMessage = (msgId: string, senderName: string, snippet: string) => {
+    setActiveReactionMsgId(null);
+    const isCurrentlyPinned = pinnedMessage?.id === msgId;
+    const nextPin = isCurrentlyPinned ? null : { id: msgId, sender_name: senderName, content: snippet };
+    setPinnedMessage(nextPin);
+
+    // Broadcast pin state to peer room channel in real-time
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'pin_update',
+        payload: { conversation_id: chat.id, pinned: nextPin }
+      });
+    }
+  };
+
   return (
     <motion.div 
       initial={{ x: "100%" }} 
@@ -1343,6 +1366,46 @@ function ChatView({
         )}
       </AnimatePresence>
 
+      {/* Pinned Message Glassmorphic Banner (WhatsApp/Telegram style) */}
+      <AnimatePresence>
+        {pinnedMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => {
+              messageRefs.current[pinnedMessage.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }}
+            className="glass-strong border-b border-primary/20 px-3.5 py-2 flex items-center justify-between cursor-pointer hover:bg-white/5 transition select-none"
+          >
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="p-1.5 rounded-lg bg-primary/20 text-primary shrink-0">
+                <Pin className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0 flex-1 text-xs">
+                <div className="text-[10px] font-bold text-primary tracking-wide uppercase">
+                  Pinned message · {pinnedMessage.sender_name}
+                </div>
+                <div className="truncate text-slate-300 text-[11px] font-medium">
+                  {pinnedMessage.content}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePinMessage(pinnedMessage.id, pinnedMessage.sender_name, pinnedMessage.content);
+              }}
+              title="Unpin message"
+              className="p-1 rounded-lg text-muted-foreground hover:text-white hover:bg-white/10 cursor-pointer ml-2"
+            >
+              <PinOff className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-4">
         {loading && msgs.length === 0 ? (
           <div className="text-center py-6 text-xs text-muted-foreground animate-pulse">Loading live conversation...</div>
@@ -1394,6 +1457,23 @@ function ChatView({
                           className="text-xs text-primary font-bold ml-1 pl-1.5 border-l border-white/20 hover:underline cursor-pointer"
                         >
                           Reply
+                        </button>
+                        {/* Pin / Unpin button */}
+                        <button
+                          onClick={() => {
+                            const snippet = (m.message_type === 'image' || m.text?.startsWith('data:image'))
+                              ? '📷 Photo'
+                              : (m.message_type === 'audio' ? '🎤 Voice note' : m.text);
+                            togglePinMessage(String(m.id), m.me ? 'You' : chat.name, snippet);
+                          }}
+                          title={pinnedMessage?.id === String(m.id) ? "Unpin message" : "Pin message"}
+                          className={`text-xs p-1 rounded cursor-pointer ${
+                            pinnedMessage?.id === String(m.id)
+                              ? 'text-primary bg-primary/20'
+                              : 'text-slate-300 hover:text-white hover:bg-white/10'
+                          }`}
+                        >
+                          <Pin className="w-3.5 h-3.5" />
                         </button>
                         {/* Delete for Me button */}
                         <button
