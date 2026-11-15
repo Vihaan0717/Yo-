@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { AnimatePresence, motion, LayoutGroup } from "motion/react";
+import { useState, useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { 
   MessageCircle, 
   Phone, 
@@ -132,7 +132,9 @@ function ChatsTab({
               onClick={() => onOpen(c)}
               className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass cursor-pointer"
             >
-              <motion.div layoutId={`av-${c.id}`}><Avatar chat={c} /></motion.div>
+              <div className="relative">
+                <Avatar chat={c} />
+              </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate font-semibold">{c.name}</span>
@@ -158,9 +160,8 @@ function ChatsTab({
 
 function CallsTab({ onStartCall }: { onStartCall: (type: "audio" | "video", chat: Chat) => void }) {
   const sampleCalls = [
-    { id: "c1", name: "Aarav Mehta", handle: "@aarav", type: "video", dir: "in", missed: false, time: "Today, 21:10", hue: 200 },
-    { id: "c2", name: "Sana Kapoor", handle: "@sana", type: "voice", dir: "out", missed: false, time: "Today, 18:42", hue: 330 },
-    { id: "c3", name: "Rahul Verma", handle: "@rahulv", type: "voice", dir: "in", missed: true, time: "Yesterday", hue: 40 },
+    { id: "c1", name: "Alex Hunter", handle: "@alex", type: "video", dir: "in", missed: false, time: "Today, 21:10", hue: 200 },
+    { id: "c2", name: "Samira Chen", handle: "@samira", type: "voice", dir: "out", missed: false, time: "Today, 18:42", hue: 330 },
   ];
 
   return (
@@ -213,7 +214,6 @@ function PeopleTab({
         }
         const { data } = await query;
         if (data) {
-          // Exclude self
           setProfiles(data.filter((p: Profile) => p.id !== user?.id));
         }
       } catch (err) {
@@ -372,6 +372,9 @@ function ChatView({
   const [msgs, setMsgs] = useState<Array<{ id: string | number; me: boolean; text: string; time: string }>>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
+  const [isPeerTyping, setIsPeerTyping] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+  const channelRef = useRef<any>(null);
 
   // Fetch real messages & listen to live broadcast and database changes
   useEffect(() => {
@@ -395,24 +398,35 @@ function ChatView({
       }
       setLoading(false);
 
-      // Subscribe with both Postgres changes AND instant Broadcast channel
+      // Single shared channel instance
       channel = supabase.channel(`room_${chat.id}`);
+      channelRef.current = channel;
 
       channel
         .on('broadcast', { event: 'new_msg' }, (payload: any) => {
           const msg = payload.payload;
+          // Ignore own broadcast to prevent duplicate messages
+          if (msg.sender_id === user?.id) return;
+
           setMsgs((prev) => {
-            if (prev.some((m) => m.id === msg.id)) return prev;
+            if (prev.some((m) => m.id === msg.id || (m.text === msg.content && Math.abs(Number(m.id) - Number(msg.id)) < 2000))) return prev;
             return [
               ...prev,
               {
                 id: msg.id,
-                me: msg.sender_id === user?.id,
+                me: false,
                 text: msg.content,
                 time: msg.time || new Date().toTimeString().slice(0, 5)
               }
             ];
           });
+        })
+        .on('broadcast', { event: 'typing' }, (payload: any) => {
+          if (payload.payload?.sender_id !== user?.id) {
+            setIsPeerTyping(true);
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = setTimeout(() => setIsPeerTyping(false), 2000);
+          }
         })
         .on(
           'postgres_changes',
@@ -420,7 +434,8 @@ function ChatView({
           (payload: any) => {
             const newMsg = payload.new;
             setMsgs((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              // Deduplicate if already present from local optimistic send or broadcast
+              if (prev.some((m) => m.id === newMsg.id || (m.me && m.text === newMsg.content))) return prev;
               return [
                 ...prev,
                 {
@@ -440,8 +455,20 @@ function ChatView({
 
     return () => {
       if (channel) supabase.removeChannel(channel);
+      channelRef.current = null;
     };
   }, [chat.id, user?.id]);
+
+  const handleInputChange = (val: string) => {
+    setText(val);
+    if (channelRef.current && user) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { sender_id: user.id }
+      });
+    }
+  };
 
   const send = async () => {
     if (!text.trim() || !user) return;
@@ -457,20 +484,22 @@ function ChatView({
       time: nowTime
     };
 
-    // 1. Instant local display
+    // 1. Instant local display (Single message)
     setMsgs((m) => [...m, newEntry]);
 
-    // 2. Instant peer broadcast (low-latency WebSockets)
-    supabase.channel(`room_${chat.id}`).send({
-      type: 'broadcast',
-      event: 'new_msg',
-      payload: {
-        id: tempId,
-        sender_id: user.id,
-        content,
-        time: nowTime
-      }
-    });
+    // 2. Broadcast to other peer (Only they will render it)
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'new_msg',
+        payload: {
+          id: tempId,
+          sender_id: user.id,
+          content,
+          time: nowTime
+        }
+      });
+    }
 
     // 3. Persistent PostgreSQL database insert
     const { error } = await supabase.from('messages').insert({
@@ -486,29 +515,42 @@ function ChatView({
   };
 
   return (
-    <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", stiffness: 420, damping: 40 }}
-      className="absolute inset-0 z-30 flex flex-col bg-background/60 backdrop-blur-2xl">
+    <motion.div 
+      initial={{ x: "100%" }} 
+      animate={{ x: 0 }} 
+      exit={{ x: "100%" }} 
+      transition={{ type: "tween", duration: 0.18, ease: "easeInOut" }}
+      className="absolute inset-0 z-30 flex flex-col bg-background/60 backdrop-blur-2xl"
+    >
       <div className="glass-strong flex items-center gap-3 rounded-none border-x-0 border-t-0 px-3 py-3">
-        <motion.button whileTap={{ scale: 0.8, x: -4 }} onClick={onBack} aria-label="Back" className="flex items-center text-primary cursor-pointer"><ChevronLeft className="h-7 w-7" /></motion.button>
-        <motion.div layoutId={`av-${chat.id}`}><Avatar chat={chat} size={40} /></motion.div>
+        <button 
+          onClick={onBack} 
+          aria-label="Back" 
+          className="flex items-center text-primary cursor-pointer active:scale-90 transition-transform p-1"
+        >
+          <ChevronLeft className="h-7 w-7" />
+        </button>
+        <Avatar chat={chat} size={40} />
         <div className="flex-1">
           <div className="font-semibold leading-tight">{chat.name}</div>
           <div className="text-xs text-accent flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
-            <span>{chat.online ? "online" : chat.handle}</span>
+            <span>{isPeerTyping ? "typing..." : (chat.online ? "online" : chat.handle)}</span>
           </div>
         </div>
         <IconBtn label="Voice call" onClick={() => onStartCall("audio", chat)}><Phone className="h-4 w-4" /></IconBtn>
         <IconBtn label="Video call" onClick={() => onStartCall("video", chat)}><Video className="h-4 w-4" /></IconBtn>
       </div>
+
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-4">
         <div className="glass mx-auto rounded-full px-3 py-1 text-[11px] text-muted-foreground">Today</div>
         {loading && msgs.length === 0 ? (
           <div className="text-center py-6 text-xs text-muted-foreground animate-pulse">Loading live conversation...</div>
         ) : null}
+        
         <AnimatePresence initial={false}>
           {msgs.map((m, i) => (
-            <motion.div key={m.id} layout initial={{ opacity: 0, y: 20, scale: 0.85 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+            <motion.div key={m.id} layout initial={{ opacity: 0, y: 12, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
               style={{ originX: m.me ? 1 : 0, originY: 1 }}
               className={`max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] ${m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"}`}>
@@ -519,13 +561,20 @@ function ChatView({
             </motion.div>
           ))}
         </AnimatePresence>
+
+        {isPeerTyping && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="glass self-start rounded-3xl rounded-bl-lg px-4 py-2 mt-1">
+            <Typing />
+          </motion.div>
+        )}
       </div>
+
       <div className="flex items-center gap-2 p-3 pb-6">
         <IconBtn label="Attach"><Plus className="h-5 w-5" /></IconBtn>
         <div className="glass flex flex-1 items-center rounded-full px-4 py-2.5">
           <input 
             value={text} 
-            onChange={(e) => setText(e.target.value)} 
+            onChange={(e) => handleInputChange(e.target.value)} 
             onKeyDown={(e) => e.key === "Enter" && send()} 
             placeholder="Message" 
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" 
@@ -596,6 +645,10 @@ export function YoApp() {
           const handle = profile?.username ? `@${profile.username}` : "direct";
           const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
 
+          // Check if unread (if current chat is not active)
+          const isCurrentActive = open?.id === conv.id;
+          const unreadCount = isCurrentActive ? 0 : (conv.unread_count || 1);
+
           formatted.push({
             id: conv.id,
             name,
@@ -603,14 +656,14 @@ export function YoApp() {
             hue,
             last: conv.last_message_preview || "Conversation started",
             time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
-            unread: 0,
+            unread: unreadCount,
             online: true,
             target_user_id: profile?.id
           });
         }
         setChatsList(formatted);
       } else {
-        // Fallback for demo when no conversations are created yet
+        const isCurrentActive = open?.id === "shared-direct-room";
         const defaultChat: Chat = {
           id: "shared-direct-room",
           name: "Yo Direct Chat",
@@ -618,7 +671,7 @@ export function YoApp() {
           hue: 200,
           last: "Tap here to chat across devices!",
           time: "Now",
-          unread: 0,
+          unread: isCurrentActive ? 0 : 0,
           online: true
         };
         setChatsList([defaultChat]);
@@ -631,18 +684,29 @@ export function YoApp() {
   useEffect(() => {
     refreshConversations();
 
-    // Subscribe to conversations changes
-    const channel = supabase
-      .channel('public:conversations')
+    // Global listener for new messages when user is on the chat list to update badge count
+    const globalChannel = supabase
+      .channel('global_messages_listener')
+      .on('broadcast', { event: 'new_msg' }, (payload: any) => {
+        const msg = payload.payload;
+        if (msg.sender_id !== user?.id) {
+          setChatsList((prev) => 
+            prev.map((c) => {
+              if (open?.id === c.id) return { ...c, last: msg.content, time: msg.time };
+              return { ...c, last: msg.content, time: msg.time, unread: (c.unread || 0) + 1 };
+            })
+          );
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
         refreshConversations();
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(globalChannel);
     };
-  }, [user?.id]);
+  }, [user?.id, open?.id]);
 
   const startDirectChat = async (targetUser: Profile) => {
     if (!user) {
@@ -650,7 +714,6 @@ export function YoApp() {
       return;
     }
 
-    // Call our SQL RPC function to get or create direct conversation
     const { data: convId, error } = await supabase.rpc('get_or_create_direct_conversation', {
       target_user_id: targetUser.id
     });
@@ -736,55 +799,58 @@ export function YoApp() {
         <div className="animate-blob absolute bottom-10 left-1/4 h-80 w-80 rounded-full bg-[#8b5cf6]/20 blur-[110px]" style={{ animationDelay: "-9s" }} />
       </div>
 
-      <LayoutGroup>
-        <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-white/5 flex flex-col justify-between">
-          <div className="h-full overflow-y-auto">
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.div key={tab} initial={{ opacity: 0, y: 12, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, y: -8, filter: "blur(6px)" }} transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}>
-                {tab === "chats" && (
-                  <ChatsTab 
-                    chatsList={chatsList} 
-                    onOpen={setOpen} 
-                    onNewChat={() => setTab("people")} 
-                  />
-                )}
-                {tab === "calls" && <CallsTab onStartCall={startCall} />}
-                {tab === "people" && <PeopleTab onStartDirectChat={startDirectChat} />}
-                {tab === "settings" && <SettingsTab onOpenAuth={() => setAuthOpen(true)} />}
-              </motion.div>
-            </AnimatePresence>
-          </div>
-
-          {/* Floating iOS Glass Bottom Navigation */}
-          <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5">
-            {tabs.map((t) => {
-              const active = tab === t.id;
-              return (
-                <motion.button key={t.id} whileTap={{ scale: 0.88 }} onClick={() => setTab(t.id)}
-                  className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold cursor-pointer ${active ? "text-primary-foreground" : "text-muted-foreground"}`}>
-                  {active && <motion.span layoutId="tab-pill" transition={spring} className="bg-brand absolute inset-0 rounded-3xl shadow-glow" />}
-                  <motion.span className="relative" animate={active ? { y: [0, -5, 0], rotate: [0, -10, 0] } : { y: 0 }} transition={{ duration: 0.4 }}>
-                    <t.icon className="h-5 w-5" strokeWidth={active ? 2.5 : 2} />
-                  </motion.span>
-                  <span className="relative">{t.label}</span>
-                </motion.button>
-              );
-            })}
-          </nav>
-
-          <AnimatePresence>
-            {open && (
-              <ChatView 
-                key={open.id} 
-                chat={open} 
-                onBack={() => setOpen(null)} 
-                onStartCall={startCall}
-              />
-            )}
+      <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-white/5 flex flex-col justify-between">
+        <div className="h-full overflow-y-auto">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.div key={tab} initial={{ opacity: 0, y: 12, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -8, filter: "blur(6px)" }} transition={{ duration: 0.18, ease: "easeOut" }}>
+              {tab === "chats" && (
+                <ChatsTab 
+                  chatsList={chatsList} 
+                  onOpen={(c) => {
+                    // Reset unread on opening
+                    setChatsList(prev => prev.map(item => item.id === c.id ? { ...item, unread: 0 } : item));
+                    setOpen(c);
+                  }} 
+                  onNewChat={() => setTab("people")} 
+                />
+              )}
+              {tab === "calls" && <CallsTab onStartCall={startCall} />}
+              {tab === "people" && <PeopleTab onStartDirectChat={startDirectChat} />}
+              {tab === "settings" && <SettingsTab onOpenAuth={() => setAuthOpen(true)} />}
+            </motion.div>
           </AnimatePresence>
-        </main>
-      </LayoutGroup>
+        </div>
+
+        {/* Floating iOS Glass Bottom Navigation */}
+        <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5">
+          {tabs.map((t) => {
+            const active = tab === t.id;
+            return (
+              <motion.button key={t.id} whileTap={{ scale: 0.88 }} onClick={() => setTab(t.id)}
+                className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold cursor-pointer ${active ? "text-primary-foreground" : "text-muted-foreground"}`}>
+                {active && <motion.span layoutId="tab-pill" transition={spring} className="bg-brand absolute inset-0 rounded-3xl shadow-glow" />}
+                <motion.span className="relative" animate={active ? { y: [0, -5, 0], rotate: [0, -10, 0] } : { y: 0 }} transition={{ duration: 0.4 }}>
+                  <t.icon className="h-5 w-5" strokeWidth={active ? 2.5 : 2} />
+                </motion.span>
+                <span className="relative">{t.label}</span>
+              </motion.button>
+            );
+          })}
+        </nav>
+
+        {/* Instant back-transition Chat view */}
+        <AnimatePresence>
+          {open && (
+            <ChatView 
+              key={open.id} 
+              chat={open} 
+              onBack={() => setOpen(null)} 
+              onStartCall={startCall}
+            />
+          )}
+        </AnimatePresence>
+      </main>
 
       {/* WebRTC Video / Audio HUD overlay */}
       {activeCall && (
