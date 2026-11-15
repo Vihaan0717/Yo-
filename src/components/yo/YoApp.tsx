@@ -44,6 +44,7 @@ import { VoiceRecorderService } from "../../services/voice/VoiceRecorderService"
 import { CallOverlay } from "../../features/calls/components/CallOverlay";
 import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
 import { AuthModal } from "../modals/AuthModal";
+import { CreateGroupModal } from "../modals/CreateGroupModal";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../services/supabase/client";
 import type { CallSession, Profile } from "../../types";
@@ -148,18 +149,32 @@ function Typing() {
 function ChatsTab({ 
   chatsList, 
   onOpen, 
-  onNewChat 
+  onNewChat,
+  onNewGroup
 }: { 
   chatsList: Chat[]; 
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
+  onNewGroup: () => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = chatsList.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase()));
 
   return (
     <>
-      <Header title="Chats" right={<IconBtn label="New chat" onClick={onNewChat}><PenSquare className="h-4 w-4" /></IconBtn>} />
+      <Header 
+        title="Chats" 
+        right={
+          <div className="flex items-center gap-1">
+            <IconBtn label="New group" onClick={onNewGroup}>
+              <Users className="h-4 w-4" />
+            </IconBtn>
+            <IconBtn label="New chat" onClick={onNewChat}>
+              <PenSquare className="h-4 w-4" />
+            </IconBtn>
+          </div>
+        } 
+      />
       <SearchBar value={search} onChange={setSearch} />
       <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
         {filtered.map((c) => (
@@ -1426,6 +1441,13 @@ function ChatView({
                   <UnreadSeparator count={unreadCountAtOpen} />
                 )}
 
+                {m.message_type === 'system' ? (
+                  <div className="flex items-center justify-center my-2 select-none">
+                    <div className="glass px-3.5 py-1 rounded-full text-[11px] text-muted-foreground text-center border border-white/5">
+                      {m.text}
+                    </div>
+                  </div>
+                ) : (
                 <div className="relative flex flex-col group">
                   {/* Floating Reaction Pill Picker on Tap/Long-Press */}
                   <AnimatePresence>
@@ -1584,6 +1606,7 @@ function ChatView({
                     </motion.div>
                   </div>
                 </div>
+                )}
               </React.Fragment>
             );
           })}
@@ -1707,6 +1730,7 @@ export function YoApp() {
   }, [open]);
 
   const [authOpen, setAuthOpen] = useState(false);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [chatsList, setChatsList] = useState<Chat[]>([]);
 
   // WebRTC Calling state
@@ -1737,18 +1761,31 @@ export function YoApp() {
           const conv = item.conversations as any;
           if (!conv) continue;
 
-          // Fetch other participant profile
-          const { data: otherMember } = await supabase
-            .from('conversation_members')
-            .select('user_id, profiles(*)')
-            .eq('conversation_id', conv.id)
-            .neq('user_id', user.id)
-            .maybeSingle();
+          // For groups, handle displays member count and name is group title
+          let name = conv.title || "Yo Direct Chat";
+          let handle = "direct";
+          let hue = 180;
+          let targetUserId = undefined;
 
-          const profile = (otherMember as any)?.profiles;
-          const name = profile?.display_name || conv.title || "Yo Direct Chat";
-          const handle = profile?.username ? `@${profile.username}` : "direct";
-          const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
+          if (conv.type === 'group') {
+            name = conv.title || "Group Chat";
+            handle = "group";
+            hue = (name.charCodeAt(0) * 41) % 360;
+          } else {
+            // Fetch other participant profile for direct chat
+            const { data: otherMember } = await supabase
+              .from('conversation_members')
+              .select('user_id, profiles(*)')
+              .eq('conversation_id', conv.id)
+              .neq('user_id', user.id)
+              .maybeSingle();
+
+            const profile = (otherMember as any)?.profiles;
+            name = profile?.display_name || conv.title || "Yo Direct Chat";
+            handle = profile?.username ? `@${profile.username}` : "direct";
+            hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
+            targetUserId = profile?.id;
+          }
 
           // WhatsApp read watermark logic:
           const isCurrentActive = openRef.current?.id === conv.id;
@@ -1792,7 +1829,7 @@ export function YoApp() {
             time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
             unread: unreadCount,
             online: true,
-            target_user_id: profile?.id
+            target_user_id: targetUserId
           });
         }
 
@@ -2068,6 +2105,7 @@ export function YoApp() {
                     }
                   }} 
                   onNewChat={() => setTab("people")} 
+                  onNewGroup={() => setGroupModalOpen(true)}
                 />
               )}
               {tab === "calls" && <CallsTab onStartCall={startCall} />}
@@ -2135,6 +2173,17 @@ export function YoApp() {
 
       {/* Auth Modal for Supabase user signup & signin */}
       <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* New Group Creation Modal */}
+      <CreateGroupModal
+        isOpen={groupModalOpen}
+        onClose={() => setGroupModalOpen(false)}
+        onGroupCreated={(newGroupChat) => {
+          openRef.current = newGroupChat;
+          setOpen(newGroupChat);
+          refreshConversations();
+        }}
+      />
     </div>
   );
 }
