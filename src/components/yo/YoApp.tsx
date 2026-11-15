@@ -442,7 +442,7 @@ function ChatView({
           if (msg.sender_id === user?.id) return;
 
           setMsgs((prev) => {
-            if (prev.some((m) => m.id === msg.id || (m.text === msg.content && Math.abs(Number(m.id) - Number(msg.id)) < 2000))) return prev;
+            if (prev.some((m) => m.id === msg.id || (!m.me && (m.image_url === msg.content || m.audio_url === msg.content || m.text === msg.content)))) return prev;
             const isAudio = msg.message_type === 'audio' || (typeof msg.content === 'string' && msg.content.startsWith('data:audio'));
             const isImage = msg.message_type === 'image' || (typeof msg.content === 'string' && msg.content.startsWith('data:image'));
             return [
@@ -459,6 +459,15 @@ function ChatView({
               }
             ];
           });
+
+          // Mark as read in DB since user is actively viewing this room
+          if (user && chat.id) {
+            supabase
+              .from('conversation_members')
+              .update({ last_read_at: new Date().toISOString() })
+              .match({ conversation_id: chat.id, user_id: user.id })
+              .then();
+          }
         })
         .on('broadcast', { event: 'reaction_update' }, (payload: any) => {
           const { msgId, emoji, userId } = payload.payload;
@@ -490,16 +499,58 @@ function ChatView({
           { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${chat.id}` },
           (payload: any) => {
             const newMsg = payload.new;
+
+            // 1. If sent by current user, swap optimistic tempId with real DB id — NEVER duplicate!
+            if (newMsg.sender_id === user?.id) {
+              setMsgs((prev) => {
+                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                let replaced = false;
+                const updated = prev.map((m) => {
+                  if (
+                    !replaced &&
+                    m.me &&
+                    typeof m.id === 'string' &&
+                    (m.id.startsWith('msg-') || m.id.startsWith('img-') || m.id.startsWith('voice-'))
+                  ) {
+                    const matches =
+                      (m.image_url && m.image_url === newMsg.content) ||
+                      (m.audio_url && m.audio_url === newMsg.content) ||
+                      (m.text === newMsg.content) ||
+                      (newMsg.message_type === 'image' && m.message_type === 'image') ||
+                      (newMsg.message_type === 'audio' && m.message_type === 'audio');
+                    if (matches) {
+                      replaced = true;
+                      return { ...m, id: newMsg.id };
+                    }
+                  }
+                  return m;
+                });
+                return replaced ? updated : prev;
+              });
+              return;
+            }
+
+            // 2. If sent by peer, mark as read in DB and append only if not already received via broadcast
+            if (user && chat.id) {
+              supabase
+                .from('conversation_members')
+                .update({ last_read_at: new Date().toISOString() })
+                .match({ conversation_id: chat.id, user_id: user.id })
+                .then();
+            }
+
             setMsgs((prev) => {
-              // Deduplicate if already present from local optimistic send or broadcast
-              if (prev.some((m) => m.id === newMsg.id || (m.me && m.text === newMsg.content))) return prev;
+              // Deduplicate if already present from broadcast
+              if (prev.some((m) => m.id === newMsg.id || (!m.me && (m.image_url === newMsg.content || m.audio_url === newMsg.content || m.text === newMsg.content)))) {
+                return prev;
+              }
               const isAudio = newMsg.message_type === 'audio' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:audio'));
               const isImage = newMsg.message_type === 'image' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:image'));
               return [
                 ...prev,
                 {
                   id: newMsg.id,
-                  me: newMsg.sender_id === user?.id,
+                  me: false,
                   text: isImage ? 'Photo' : (isAudio ? 'Voice message' : newMsg.content),
                   message_type: isImage ? 'image' : (isAudio ? 'audio' : (newMsg.message_type || 'text')),
                   audio_url: isAudio ? newMsg.content : undefined,
@@ -1034,6 +1085,11 @@ export function YoApp() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("chats");
   const [open, setOpen] = useState<Chat | null>(null);
+  const openRef = useRef<Chat | null>(null);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   const [authOpen, setAuthOpen] = useState(false);
   const [chatsList, setChatsList] = useState<Chat[]>([]);
 
@@ -1056,7 +1112,7 @@ export function YoApp() {
     try {
       const { data: convMembers, error } = await supabase
         .from('conversation_members')
-        .select('conversation_id, conversations(*)')
+        .select('conversation_id, last_read_at, conversations(*)')
         .eq('user_id', user.id);
 
       if (!error && convMembers && convMembers.length > 0) {
@@ -1078,9 +1134,21 @@ export function YoApp() {
           const handle = profile?.username ? `@${profile.username}` : "direct";
           const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
 
-          // Check if unread (strictly from Supabase receipt data, default 0 for sender)
-          const isCurrentActive = open?.id === conv.id;
-          const unreadCount = isCurrentActive ? 0 : 0;
+          // Calculate real unread count from messages table
+          const isCurrentActive = openRef.current?.id === conv.id;
+          let unreadCount = 0;
+          if (!isCurrentActive) {
+            let q = supabase
+              .from('messages')
+              .select('id', { count: 'exact', head: true })
+              .eq('conversation_id', conv.id)
+              .neq('sender_id', user.id);
+            if (item.last_read_at) {
+              q = q.gt('created_at', item.last_read_at);
+            }
+            const { count } = await q;
+            unreadCount = count || 0;
+          }
 
           formatted.push({
             id: conv.id,
@@ -1094,20 +1162,32 @@ export function YoApp() {
             target_user_id: profile?.id
           });
         }
-        setChatsList(formatted);
+
+        setChatsList((prev) => {
+          return formatted.map((newChat) => {
+            const existing = prev.find((p) => p.id === newChat.id);
+            const isActive = openRef.current?.id === newChat.id;
+            if (isActive) return { ...newChat, unread: 0 };
+            const finalUnread = Math.max(newChat.unread, existing?.unread || 0);
+            return { ...newChat, unread: finalUnread };
+          });
+        });
       } else {
-        const isCurrentActive = open?.id === "shared-direct-room";
-        const defaultChat: Chat = {
-          id: "shared-direct-room",
-          name: "Yo Direct Chat",
-          handle: "@chat",
-          hue: 200,
-          last: "Tap here to chat across devices!",
-          time: "Now",
-          unread: isCurrentActive ? 0 : 0,
-          online: true
-        };
-        setChatsList([defaultChat]);
+        const isActive = openRef.current?.id === "shared-direct-room";
+        setChatsList((prev) => {
+          const existing = prev.find((p) => p.id === "shared-direct-room");
+          const defaultChat: Chat = {
+            id: "shared-direct-room",
+            name: "Yo Direct Chat",
+            handle: "@chat",
+            hue: 200,
+            last: "Tap here to chat across devices!",
+            time: "Now",
+            unread: isActive ? 0 : (existing?.unread || 0),
+            online: true
+          };
+          return [defaultChat];
+        });
       }
     } catch (e) {
       console.warn("Failed to refresh conversations:", e);
@@ -1117,17 +1197,31 @@ export function YoApp() {
   useEffect(() => {
     refreshConversations();
 
-    // Global listener for new messages & typing when user is on the chat list to update badge count and typing state
+    // Global listener for new messages & typing when user is on the chat list
     const globalChannel = supabase
       .channel('global_messages_listener')
       .on('broadcast', { event: 'new_msg' }, (payload: any) => {
         const msg = payload.payload;
         if (msg.sender_id !== user?.id) {
+          const targetConvId = msg.conversation_id || 'shared-direct-room';
+          const isCurrentlyReading = openRef.current?.id === targetConvId;
+          const preview = msg.message_type === 'image' 
+            ? '📷 Photo' 
+            : (msg.message_type === 'audio' ? '🎤 Voice note' : (msg.content || 'New message'));
+          const timeStr = msg.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
           setChatsList((prev) => 
             prev.map((c) => {
-              // If already reading this chat, update preview without incrementing unread
-              if (open?.id === c.id) return { ...c, last: msg.content, time: msg.time, typing: false };
-              return { ...c, last: msg.content, time: msg.time, unread: (c.unread || 0) + 1, typing: false };
+              if (c.id === targetConvId || (!msg.conversation_id && c.id === 'shared-direct-room')) {
+                return {
+                  ...c,
+                  last: preview,
+                  time: timeStr,
+                  unread: isCurrentlyReading ? 0 : (c.unread || 0) + 1,
+                  typing: false
+                };
+              }
+              return c;
             })
           );
         }
@@ -1150,6 +1244,32 @@ export function YoApp() {
           }, 2500);
         }
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: any) => {
+        const newMsg = payload.new;
+        if (newMsg.sender_id !== user?.id) {
+          const targetConvId = newMsg.conversation_id;
+          const isCurrentlyReading = openRef.current?.id === targetConvId;
+          const preview = newMsg.message_type === 'image' 
+            ? '📷 Photo' 
+            : (newMsg.message_type === 'audio' ? '🎤 Voice message' : (newMsg.content || 'New message'));
+          const timeStr = new Date(newMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+          setChatsList((prev) =>
+            prev.map((c) => {
+              if (c.id === targetConvId) {
+                return {
+                  ...c,
+                  last: preview,
+                  time: timeStr,
+                  unread: isCurrentlyReading ? 0 : (c.unread || 0) + 1,
+                  typing: false
+                };
+              }
+              return c;
+            })
+          );
+        }
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
         refreshConversations();
       })
@@ -1158,7 +1278,7 @@ export function YoApp() {
     return () => {
       supabase.removeChannel(globalChannel);
     };
-  }, [user?.id, open?.id]);
+  }, [user?.id]);
 
   const startDirectChat = async (targetUser: Profile) => {
     if (!user) {
@@ -1263,6 +1383,13 @@ export function YoApp() {
                     // Reset unread on opening
                     setChatsList(prev => prev.map(item => item.id === c.id ? { ...item, unread: 0 } : item));
                     setOpen(c);
+                    if (user && c.id && c.id !== 'shared-direct-room') {
+                      supabase
+                        .from('conversation_members')
+                        .update({ last_read_at: new Date().toISOString() })
+                        .match({ conversation_id: c.id, user_id: user.id })
+                        .then();
+                    }
                   }} 
                   onNewChat={() => setTab("people")} 
                 />
@@ -1297,7 +1424,10 @@ export function YoApp() {
             <ChatView 
               key={open.id} 
               chat={open} 
-              onBack={() => setOpen(null)} 
+              onBack={() => {
+                setOpen(null);
+                refreshConversations();
+              }} 
               onStartCall={startCall}
             />
           )}
