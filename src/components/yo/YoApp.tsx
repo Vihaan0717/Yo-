@@ -1,11 +1,47 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AnimatePresence, motion, LayoutGroup } from "motion/react";
-import { MessageCircle, Phone, Users, Settings, Search, PenSquare, ChevronLeft, Video, Send, Plus, Mic, PhoneIncoming, PhoneOutgoing, Bell, Lock, Moon, User, ChevronRight, UserPlus, Check, CheckCheck } from "lucide-react";
-import { chats, calls, seedMessages, type Chat } from "./data";
+import { 
+  MessageCircle, 
+  Phone, 
+  Users, 
+  Settings, 
+  Search, 
+  PenSquare, 
+  ChevronLeft, 
+  Video, 
+  Send, 
+  Plus, 
+  Mic, 
+  PhoneIncoming, 
+  PhoneOutgoing, 
+  Bell, 
+  Lock, 
+  Moon, 
+  User, 
+  ChevronRight, 
+  CheckCheck,
+  LogOut
+} from "lucide-react";
 import { Avatar } from "./Avatar";
 import { CallOverlay } from "../../features/calls/components/CallOverlay";
 import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
+import { AuthModal } from "../modals/AuthModal";
+import { useAuth } from "../../contexts/AuthContext";
+import { supabase } from "../../services/supabase/client";
 import type { CallSession, Profile } from "../../types";
+
+export type Chat = { 
+  id: string; 
+  name: string; 
+  handle: string; 
+  hue: number; 
+  last: string; 
+  time: string; 
+  unread: number; 
+  online: boolean; 
+  typing?: boolean;
+  target_user_id?: string;
+};
 
 const spring = { type: "spring", stiffness: 500, damping: 38, mass: 0.8 } as const;
 type Tab = "chats" | "calls" | "people" | "settings";
@@ -18,8 +54,14 @@ const tabs: { id: Tab; label: string; icon: typeof MessageCircle }[] = [
 
 function IconBtn({ children, onClick, label }: { children: React.ReactNode; onClick?: () => void; label: string }) {
   return (
-    <motion.button aria-label={label} onClick={onClick} whileTap={{ scale: 0.85 }} whileHover={{ scale: 1.08 }} transition={spring}
-      className="glass grid h-10 w-10 place-items-center rounded-full text-foreground">
+    <motion.button 
+      aria-label={label} 
+      onClick={onClick} 
+      whileTap={{ scale: 0.85 }} 
+      whileHover={{ scale: 1.08 }} 
+      transition={spring}
+      className="glass grid h-10 w-10 place-items-center rounded-full text-foreground cursor-pointer"
+    >
       {children}
     </motion.button>
   );
@@ -37,46 +79,19 @@ function Header({ title, right }: { title: string; right?: React.ReactNode }) {
   );
 }
 
-function SearchBar({ placeholder = "Search" }: { placeholder?: string }) {
+function SearchBar({ placeholder = "Search", value = "", onChange }: { placeholder?: string; value?: string; onChange?: (val: string) => void }) {
   return (
     <div className="px-5 pb-3">
       <label className="glass flex items-center gap-2 rounded-2xl px-4 py-2.5">
         <Search className="h-4 w-4 text-muted-foreground" />
-        <input placeholder={placeholder} className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+        <input 
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          placeholder={placeholder} 
+          className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" 
+        />
       </label>
     </div>
-  );
-}
-
-function ChatsTab({ onOpen }: { onOpen: (c: Chat) => void }) {
-  return (
-    <>
-      <Header title="Chats" right={<IconBtn label="New chat"><PenSquare className="h-4 w-4" /></IconBtn>} />
-      <SearchBar />
-      <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
-        {chats.map((c) => (
-          <motion.li key={c.id} variants={itemV}>
-            <motion.button whileTap={{ scale: 0.97 }} onClick={() => onOpen(c)}
-              className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass">
-              <motion.div layoutId={`av-${c.id}`}><Avatar chat={c} /></motion.div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-semibold">{c.name}</span>
-                  <span className={`text-xs ${c.unread ? "text-primary" : "text-muted-foreground"}`}>{c.time}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  {c.typing ? <Typing /> : <span className="truncate text-sm text-muted-foreground">{c.last}</span>}
-                  {c.unread > 0 && (
-                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...spring, delay: 0.3 }}
-                      className="bg-brand grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-bold text-primary-foreground">{c.unread}</motion.span>
-                  )}
-                </div>
-              </div>
-            </motion.button>
-          </motion.li>
-        ))}
-      </motion.ul>
-    </>
   );
 }
 
@@ -93,21 +108,83 @@ function Typing() {
   );
 }
 
-function CallsTab() {
+function ChatsTab({ 
+  chatsList, 
+  onOpen, 
+  onNewChat 
+}: { 
+  chatsList: Chat[]; 
+  onOpen: (c: Chat) => void;
+  onNewChat: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const filtered = chatsList.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase()));
+
   return (
     <>
-      <Header title="Calls" right={<IconBtn label="New call"><Phone className="h-4 w-4" /></IconBtn>} />
+      <Header title="Chats" right={<IconBtn label="New chat" onClick={onNewChat}><PenSquare className="h-4 w-4" /></IconBtn>} />
+      <SearchBar value={search} onChange={setSearch} />
       <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
-        {calls.map((c) => {
+        {filtered.map((c) => (
+          <motion.li key={c.id} variants={itemV}>
+            <motion.button 
+              whileTap={{ scale: 0.97 }} 
+              onClick={() => onOpen(c)}
+              className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass cursor-pointer"
+            >
+              <motion.div layoutId={`av-${c.id}`}><Avatar chat={c} /></motion.div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate font-semibold">{c.name}</span>
+                  <span className={`text-xs ${c.unread ? "text-primary font-medium" : "text-muted-foreground"}`}>{c.time}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  {c.typing ? <Typing /> : <span className="truncate text-sm text-muted-foreground">{c.last || "No messages yet"}</span>}
+                  {c.unread > 0 && (
+                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...spring, delay: 0.2 }}
+                      className="bg-brand grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-bold text-primary-foreground shadow-glow">
+                      {c.unread}
+                    </motion.span>
+                  )}
+                </div>
+              </div>
+            </motion.button>
+          </motion.li>
+        ))}
+      </motion.ul>
+    </>
+  );
+}
+
+function CallsTab({ onStartCall }: { onStartCall: (type: "audio" | "video", chat: Chat) => void }) {
+  const sampleCalls = [
+    { id: "c1", name: "Aarav Mehta", handle: "@aarav", type: "video", dir: "in", missed: false, time: "Today, 21:10", hue: 200 },
+    { id: "c2", name: "Sana Kapoor", handle: "@sana", type: "voice", dir: "out", missed: false, time: "Today, 18:42", hue: 330 },
+    { id: "c3", name: "Rahul Verma", handle: "@rahulv", type: "voice", dir: "in", missed: true, time: "Yesterday", hue: 40 },
+  ];
+
+  return (
+    <>
+      <Header title="Calls" />
+      <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
+        {sampleCalls.map((c) => {
           const Dir = c.dir === "in" ? PhoneIncoming : PhoneOutgoing;
+          const fakeChat: Chat = { id: c.id, name: c.name, handle: c.handle, hue: c.hue, last: "", time: c.time, unread: 0, online: true };
           return (
             <motion.li key={c.id} variants={itemV} className="flex items-center gap-3 rounded-3xl px-3 py-3 hover:bg-glass">
-              <Avatar chat={c.chat} size={46} />
+              <Avatar chat={fakeChat} size={46} />
               <div className="flex-1">
-                <div className={`font-semibold ${c.missed ? "text-destructive" : ""}`}>{c.chat.name}</div>
-                <div className="flex items-center gap-1 text-xs text-muted-foreground"><Dir className="h-3 w-3" />{c.type === "video" ? "Video" : "Voice"} · {c.time}</div>
+                <div className={`font-semibold ${c.missed ? "text-destructive" : ""}`}>{c.name}</div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Dir className="h-3 w-3" />{c.type === "video" ? "Video" : "Voice"} · {c.time}
+                </div>
               </div>
-              <IconBtn label="Call back">{c.type === "video" ? <Video className="h-4 w-4 text-primary" /> : <Phone className="h-4 w-4 text-primary" />}</IconBtn>
+              <IconBtn 
+                label="Call back" 
+                onClick={() => onStartCall(c.type as "audio" | "video", fakeChat)}
+              >
+                {c.type === "video" ? <Video className="h-4 w-4 text-primary" /> : <Phone className="h-4 w-4 text-primary" />}
+              </IconBtn>
             </motion.li>
           );
         })}
@@ -116,31 +193,88 @@ function CallsTab() {
   );
 }
 
-function PeopleTab() {
-  const [added, setAdded] = useState<string[]>([]);
+function PeopleTab({ 
+  onStartDirectChat 
+}: { 
+  onStartDirectChat: (targetUser: Profile) => void;
+}) {
+  const { user } = useAuth();
+  const [search, setSearch] = useState("");
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      setLoading(true);
+      try {
+        let query = supabase.from('profiles').select('*').limit(20);
+        if (search.trim()) {
+          query = query.or(`username.ilike.%${search.trim()}%,display_name.ilike.%${search.trim()}%`);
+        }
+        const { data } = await query;
+        if (data) {
+          // Exclude self
+          setProfiles(data.filter((p: Profile) => p.id !== user?.id));
+        }
+      } catch (err) {
+        console.warn("Could not load users:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, [search, user?.id]);
+
   return (
     <>
       <Header title="People" />
-      <SearchBar placeholder="Find by @username or ID" />
+      <SearchBar 
+        placeholder="Find by @username or name" 
+        value={search} 
+        onChange={setSearch} 
+      />
       <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
-        {chats.filter((c) => c.handle.startsWith("@")).map((c) => {
-          const on = added.includes(c.id);
-          return (
-            <motion.li key={c.id} variants={itemV} className="flex items-center gap-3 rounded-3xl px-3 py-3 hover:bg-glass">
-              <Avatar chat={c} size={46} />
-              <div className="flex-1"><div className="font-semibold">{c.name}</div><div className="text-xs text-muted-foreground">{c.handle}</div></div>
-              <motion.button whileTap={{ scale: 0.85 }} onClick={() => setAdded((a) => on ? a.filter((x) => x !== c.id) : [...a, c.id])}
-                className={`flex items-center gap-1 rounded-full px-3.5 py-1.5 text-xs font-semibold ${on ? "glass" : "bg-brand text-primary-foreground shadow-glow"}`}>
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.span key={on ? "y" : "n"} initial={{ rotate: -90, scale: 0 }} animate={{ rotate: 0, scale: 1 }} exit={{ rotate: 90, scale: 0 }} transition={spring}>
-                    {on ? <Check className="h-3.5 w-3.5" /> : <UserPlus className="h-3.5 w-3.5" />}
-                  </motion.span>
-                </AnimatePresence>
-                {on ? "Added" : "Add"}
-              </motion.button>
-            </motion.li>
-          );
-        })}
+        {loading ? (
+          <div className="p-8 text-center text-xs text-muted-foreground">Searching network...</div>
+        ) : profiles.length === 0 ? (
+          <div className="p-8 text-center text-xs text-muted-foreground">
+            {search ? "No users matching that handle found." : "Invite friends or search by unique @handle!"}
+          </div>
+        ) : (
+          profiles.map((p) => {
+            const hue = (p.username.charCodeAt(0) * 37) % 360;
+            const chatObj: Chat = {
+              id: p.id,
+              name: p.display_name,
+              handle: `@${p.username}`,
+              hue,
+              last: "",
+              time: "",
+              unread: 0,
+              online: true,
+              target_user_id: p.id
+            };
+
+            return (
+              <motion.li key={p.id} variants={itemV} className="flex items-center gap-3 rounded-3xl px-3 py-3 hover:bg-glass">
+                <Avatar chat={chatObj} size={46} />
+                <div className="flex-1">
+                  <div className="font-semibold">{p.display_name}</div>
+                  <div className="text-xs text-muted-foreground">@{p.username}</div>
+                </div>
+                <motion.button 
+                  whileTap={{ scale: 0.88 }} 
+                  onClick={() => onStartDirectChat(p)}
+                  className="flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold bg-brand text-primary-foreground shadow-glow cursor-pointer"
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  <span>Chat</span>
+                </motion.button>
+              </motion.li>
+            );
+          })
+        )}
       </motion.ul>
     </>
   );
@@ -149,28 +283,70 @@ function PeopleTab() {
 function Toggle({ initial = true }: { initial?: boolean }) {
   const [on, setOn] = useState(initial);
   return (
-    <button aria-label="Toggle" onClick={() => setOn(!on)} className={`flex h-7 w-12 rounded-full p-0.5 transition-colors ${on ? "bg-accent justify-end" : "bg-secondary justify-start"}`}>
+    <button aria-label="Toggle" onClick={() => setOn(!on)} className={`flex h-7 w-12 rounded-full p-0.5 transition-colors cursor-pointer ${on ? "bg-accent justify-end" : "bg-secondary justify-start"}`}>
       <motion.span layout transition={spring} className="h-6 w-6 rounded-full bg-foreground shadow-glow" />
     </button>
   );
 }
 
-function SettingsTab() {
-  const me: Chat = { id: "me", name: "Mugasala Rohit", handle: "@rohit", hue: 190, last: "", time: "", unread: 0, online: true };
+function SettingsTab({ onOpenAuth }: { onOpenAuth: () => void }) {
+  const { user, signOut } = useAuth();
+  const hue = user?.username ? (user.username.charCodeAt(0) * 37) % 360 : 190;
+  
+  const me: Chat = { 
+    id: user?.id || "me", 
+    name: user?.display_name || "Guest User", 
+    handle: user?.username ? `@${user.username}` : "@guest", 
+    hue, 
+    last: "", 
+    time: "", 
+    unread: 0, 
+    online: true 
+  };
+
   const rows = [
-    { icon: User, label: "Account", hue: 210 }, { icon: Lock, label: "Privacy", hue: 150 },
-    { icon: Bell, label: "Notifications", hue: 20, toggle: true }, { icon: Moon, label: "Dark glass", hue: 270, toggle: true },
+    { icon: User, label: "Account", hue: 210, action: onOpenAuth }, 
+    { icon: Lock, label: "Privacy & Encryption", hue: 150 },
+    { icon: Bell, label: "Notifications", hue: 20, toggle: true }, 
+    { icon: Moon, label: "Dark glass", hue: 270, toggle: true },
   ];
+
   return (
     <>
       <Header title="Settings" />
-      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={spring} className="glass mx-5 flex items-center gap-4 rounded-3xl p-4">
-        <Avatar chat={me} size={64} />
-        <div><div className="text-lg font-bold">{me.name}</div><div className="text-sm text-muted-foreground">{me.handle} · ID 482 915</div></div>
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={spring} className="glass mx-5 flex items-center justify-between gap-4 rounded-3xl p-4">
+        <div className="flex items-center gap-3.5">
+          <Avatar chat={me} size={64} />
+          <div>
+            <div className="text-lg font-bold">{me.name}</div>
+            <div className="text-sm text-muted-foreground">{me.handle} · ID {me.id.slice(0, 8)}</div>
+          </div>
+        </div>
+        {user ? (
+          <button 
+            onClick={() => signOut()} 
+            className="p-2.5 rounded-2xl glass text-red-400 hover:bg-red-500/20 transition cursor-pointer"
+            title="Log Out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        ) : (
+          <button 
+            onClick={onOpenAuth}
+            className="px-3.5 py-1.5 rounded-xl bg-brand text-primary-foreground font-semibold text-xs shadow-glow cursor-pointer"
+          >
+            Log In
+          </button>
+        )}
       </motion.div>
       <motion.ul variants={listV} initial="hidden" animate="show" className="glass mx-5 mt-5 divide-y divide-border overflow-hidden rounded-3xl">
         {rows.map((r) => (
-          <motion.li key={r.label} variants={itemV} className="flex items-center gap-3 px-4 py-3.5">
+          <motion.li 
+            key={r.label} 
+            variants={itemV} 
+            onClick={r.action}
+            className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-white/5 transition-colors"
+          >
             <motion.span whileHover={{ rotate: 12, scale: 1.1 }} className="grid h-8 w-8 place-items-center rounded-xl" style={{ background: `oklch(0.65 0.17 ${r.hue})` }}>
               <r.icon className="h-4 w-4 text-foreground" />
             </motion.span>
@@ -183,38 +359,126 @@ function SettingsTab() {
   );
 }
 
-function ChatView({
-  chat,
-  onBack,
-  onStartCall
-}: {
-  chat: Chat;
-  onBack: () => void;
+function ChatView({ 
+  chat, 
+  onBack, 
+  onStartCall 
+}: { 
+  chat: Chat; 
+  onBack: () => void; 
   onStartCall: (type: "audio" | "video", chat: Chat) => void;
 }) {
-  const [msgs, setMsgs] = useState(seedMessages);
+  const { user } = useAuth();
+  const [msgs, setMsgs] = useState<Array<{ id: string | number; me: boolean; text: string; time: string }>>([]);
   const [text, setText] = useState("");
-  const send = () => {
-    if (!text.trim()) return;
-    setMsgs((m) => [...m, { id: Date.now(), me: true, text: text.trim(), time: new Date().toTimeString().slice(0, 5) }]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch real messages & listen to live Supabase Realtime changes
+  useEffect(() => {
+    let channel: any = null;
+
+    const loadMessages = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', chat.id)
+        .order('created_at', { ascending: true });
+
+      if (!error && data) {
+        setMsgs(data.map((m: any) => ({
+          id: m.id,
+          me: m.sender_id === user?.id,
+          text: m.content,
+          time: new Date(m.created_at).toTimeString().slice(0, 5)
+        })));
+      }
+      setLoading(false);
+
+      // Subscribe to live new incoming messages
+      channel = supabase
+        .channel(`chat:${chat.id}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${chat.id}` },
+          (payload: any) => {
+            const newMsg = payload.new;
+            setMsgs((prev) => {
+              if (prev.some((m) => m.id === newMsg.id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: newMsg.id,
+                  me: newMsg.sender_id === user?.id,
+                  text: newMsg.content,
+                  time: new Date(newMsg.created_at).toTimeString().slice(0, 5)
+                }
+              ];
+            });
+          }
+        )
+        .subscribe();
+    };
+
+    loadMessages();
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [chat.id, user?.id]);
+
+  const send = async () => {
+    if (!text.trim() || !user) return;
+    const content = text.trim();
     setText("");
+
+    // Optimistic insert
+    const tempId = `temp-${Date.now()}`;
+    const newEntry = {
+      id: tempId,
+      me: true,
+      text: content,
+      time: new Date().toTimeString().slice(0, 5)
+    };
+    setMsgs((m) => [...m, newEntry]);
+
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: chat.id,
+      sender_id: user.id,
+      content,
+      message_type: 'text'
+    });
+
+    if (error) {
+      console.error("Failed to send message to Supabase:", error);
+    }
   };
+
   return (
     <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", stiffness: 420, damping: 40 }}
       className="absolute inset-0 z-30 flex flex-col bg-background/60 backdrop-blur-2xl">
       <div className="glass-strong flex items-center gap-3 rounded-none border-x-0 border-t-0 px-3 py-3">
-        <motion.button whileTap={{ scale: 0.8, x: -4 }} onClick={onBack} aria-label="Back" className="flex items-center text-primary"><ChevronLeft className="h-7 w-7" /></motion.button>
+        <motion.button whileTap={{ scale: 0.8, x: -4 }} onClick={onBack} aria-label="Back" className="flex items-center text-primary cursor-pointer"><ChevronLeft className="h-7 w-7" /></motion.button>
         <motion.div layoutId={`av-${chat.id}`}><Avatar chat={chat} size={40} /></motion.div>
-        <div className="flex-1"><div className="font-semibold leading-tight">{chat.name}</div><div className="text-xs text-accent">{chat.online ? "online" : chat.handle}</div></div>
+        <div className="flex-1">
+          <div className="font-semibold leading-tight">{chat.name}</div>
+          <div className="text-xs text-accent flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+            <span>{chat.online ? "online" : chat.handle}</span>
+          </div>
+        </div>
         <IconBtn label="Voice call" onClick={() => onStartCall("audio", chat)}><Phone className="h-4 w-4" /></IconBtn>
         <IconBtn label="Video call" onClick={() => onStartCall("video", chat)}><Video className="h-4 w-4" /></IconBtn>
       </div>
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-4">
         <div className="glass mx-auto rounded-full px-3 py-1 text-[11px] text-muted-foreground">Today</div>
+        {loading && msgs.length === 0 ? (
+          <div className="text-center py-6 text-xs text-muted-foreground animate-pulse">Loading live conversation...</div>
+        ) : null}
         <AnimatePresence initial={false}>
           {msgs.map((m, i) => (
             <motion.div key={m.id} layout initial={{ opacity: 0, y: 20, scale: 0.85 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ ...spring, delay: m.id < 100 ? i * 0.04 : 0 }}
+              transition={{ ...spring, delay: typeof m.id === 'number' && m.id < 100 ? i * 0.04 : 0 }}
               style={{ originX: m.me ? 1 : 0, originY: 1 }}
               className={`max-w-[78%] rounded-3xl px-4 py-2.5 text-[15px] ${m.me ? "bg-bubble self-end rounded-br-lg text-primary-foreground shadow-glow" : "glass self-start rounded-bl-lg"}`}>
               {m.text}
@@ -228,9 +492,20 @@ function ChatView({
       <div className="flex items-center gap-2 p-3 pb-6">
         <IconBtn label="Attach"><Plus className="h-5 w-5" /></IconBtn>
         <div className="glass flex flex-1 items-center rounded-full px-4 py-2.5">
-          <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Message" className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+          <input 
+            value={text} 
+            onChange={(e) => setText(e.target.value)} 
+            onKeyDown={(e) => e.key === "Enter" && send()} 
+            placeholder="Message" 
+            className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" 
+          />
         </div>
-        <motion.button whileTap={{ scale: 0.8 }} onClick={send} aria-label="Send" className="bg-brand grid h-11 w-11 place-items-center rounded-full text-primary-foreground shadow-glow">
+        <motion.button 
+          whileTap={{ scale: 0.8 }} 
+          onClick={send} 
+          aria-label="Send" 
+          className="bg-brand grid h-11 w-11 place-items-center rounded-full text-primary-foreground shadow-glow cursor-pointer"
+        >
           <AnimatePresence mode="wait" initial={false}>
             <motion.span key={text ? "s" : "m"} initial={{ scale: 0, rotate: -45 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0, rotate: 45 }} transition={spring}>
               {text ? <Send className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
@@ -243,10 +518,13 @@ function ChatView({
 }
 
 export function YoApp() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("chats");
   const [open, setOpen] = useState<Chat | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [chatsList, setChatsList] = useState<Chat[]>([]);
 
-  // Calling state
+  // WebRTC Calling state
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
   const [callingChat, setCallingChat] = useState<Profile | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -255,18 +533,115 @@ export function YoApp() {
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [webrtcService, setWebrtcService] = useState<WebRTCService | null>(null);
 
+  // Load real conversations from Supabase
+  const refreshConversations = async () => {
+    if (!user) {
+      setChatsList([]);
+      return;
+    }
+
+    const { data: convMembers, error } = await supabase
+      .from('conversation_members')
+      .select('conversation_id, conversations(*)')
+      .eq('user_id', user.id);
+
+    if (!error && convMembers) {
+      const formatted: Chat[] = [];
+      for (const item of convMembers) {
+        const conv = item.conversations as any;
+        if (!conv) continue;
+
+        // Fetch other participant profile
+        const { data: otherMember } = await supabase
+          .from('conversation_members')
+          .select('user_id, profiles(*)')
+          .eq('conversation_id', conv.id)
+          .neq('user_id', user.id)
+          .maybeSingle();
+
+        const profile = (otherMember as any)?.profiles;
+        const name = profile?.display_name || conv.title || "Yo Conversation";
+        const handle = profile?.username ? `@${profile.username}` : "direct";
+        const hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
+
+        formatted.push({
+          id: conv.id,
+          name,
+          handle,
+          hue,
+          last: conv.last_message_preview || "Conversation started",
+          time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
+          unread: 0,
+          online: true,
+          target_user_id: profile?.id
+        });
+      }
+      setChatsList(formatted);
+    }
+  };
+
+  useEffect(() => {
+    refreshConversations();
+
+    // Subscribe to conversations changes
+    const channel = supabase
+      .channel('public:conversations')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+        refreshConversations();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  const startDirectChat = async (targetUser: Profile) => {
+    if (!user) {
+      setAuthOpen(true);
+      return;
+    }
+
+    // Call our SQL RPC function to get or create direct conversation
+    const { data: convId, error } = await supabase.rpc('get_or_create_direct_conversation', {
+      target_user_id: targetUser.id
+    });
+
+    if (error) {
+      console.error("Failed to start direct conversation:", error);
+      return;
+    }
+
+    const hue = (targetUser.username.charCodeAt(0) * 37) % 360;
+    const directChat: Chat = {
+      id: convId,
+      name: targetUser.display_name,
+      handle: `@${targetUser.username}`,
+      hue,
+      last: "",
+      time: "Now",
+      unread: 0,
+      online: true,
+      target_user_id: targetUser.id
+    };
+
+    setOpen(directChat);
+    setTab("chats");
+    refreshConversations();
+  };
+
   const startCall = async (type: "audio" | "video", chat: Chat) => {
     const session: CallSession = {
       id: `call-${Date.now()}`,
       conversation_id: chat.id,
-      initiator_id: "me",
+      initiator_id: user?.id || "me",
       call_type: type,
       status: "accepted",
       started_at: new Date().toISOString()
     };
 
     const peerProfile: Profile = {
-      id: chat.id,
+      id: chat.target_user_id || chat.id,
       username: chat.handle.replace("@", ""),
       display_name: chat.name,
       avatar_url: "",
@@ -312,25 +687,34 @@ export function YoApp() {
         <div className="animate-blob absolute right-[-60px] top-1/4 h-96 w-96 rounded-full bg-[#2dd4bf]/20 blur-[100px]" style={{ animationDelay: "-5s" }} />
         <div className="animate-blob absolute bottom-10 left-1/4 h-80 w-80 rounded-full bg-[#8b5cf6]/20 blur-[110px]" style={{ animationDelay: "-9s" }} />
       </div>
+
       <LayoutGroup>
-        <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-white/5">
+        <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-white/5 flex flex-col justify-between">
           <div className="h-full overflow-y-auto">
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.div key={tab} initial={{ opacity: 0, y: 12, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -8, filter: "blur(6px)" }} transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}>
-                {tab === "chats" && <ChatsTab onOpen={setOpen} />}
-                {tab === "calls" && <CallsTab />}
-                {tab === "people" && <PeopleTab />}
-                {tab === "settings" && <SettingsTab />}
+                {tab === "chats" && (
+                  <ChatsTab 
+                    chatsList={chatsList} 
+                    onOpen={setOpen} 
+                    onNewChat={() => setTab("people")} 
+                  />
+                )}
+                {tab === "calls" && <CallsTab onStartCall={startCall} />}
+                {tab === "people" && <PeopleTab onStartDirectChat={startDirectChat} />}
+                {tab === "settings" && <SettingsTab onOpenAuth={() => setAuthOpen(true)} />}
               </motion.div>
             </AnimatePresence>
           </div>
+
+          {/* Floating iOS Glass Bottom Navigation */}
           <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5">
             {tabs.map((t) => {
               const active = tab === t.id;
               return (
                 <motion.button key={t.id} whileTap={{ scale: 0.88 }} onClick={() => setTab(t.id)}
-                  className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold ${active ? "text-primary-foreground" : "text-muted-foreground"}`}>
+                  className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold cursor-pointer ${active ? "text-primary-foreground" : "text-muted-foreground"}`}>
                   {active && <motion.span layoutId="tab-pill" transition={spring} className="bg-brand absolute inset-0 rounded-3xl shadow-glow" />}
                   <motion.span className="relative" animate={active ? { y: [0, -5, 0], rotate: [0, -10, 0] } : { y: 0 }} transition={{ duration: 0.4 }}>
                     <t.icon className="h-5 w-5" strokeWidth={active ? 2.5 : 2} />
@@ -340,12 +724,13 @@ export function YoApp() {
               );
             })}
           </nav>
+
           <AnimatePresence>
             {open && (
-              <ChatView
-                key={open.id}
-                chat={open}
-                onBack={() => setOpen(null)}
+              <ChatView 
+                key={open.id} 
+                chat={open} 
+                onBack={() => setOpen(null)} 
                 onStartCall={startCall}
               />
             )}
@@ -367,6 +752,9 @@ export function YoApp() {
           remoteStream={remoteStream}
         />
       )}
+
+      {/* Auth Modal for Supabase user signup & signin */}
+      <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
 }
