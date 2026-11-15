@@ -22,7 +22,10 @@ import {
   CheckCheck,
   LogOut,
   Trash2,
-  Ban
+  Ban,
+  ChevronUp,
+  ChevronDown,
+  X
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -428,12 +431,65 @@ function ChatView({
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [firstUnreadSequence, setFirstUnreadSequence] = useState<number | null>(null);
   const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchMatchIndex, setSearchMatchIndex] = useState(0);
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimeoutRef = useRef<any>(null);
   const channelRef = useRef<any>(null);
   const recorderRef = useRef<VoiceRecorderService | null>(null);
   const recordTimerRef = useRef<any>(null);
   const reactionOptions = ["❤️", "🔥", "😂", "👍", "😮", "🙏"];
+
+  // Matching messages for In-Chat search
+  const matchedMsgIds = searchQuery.trim()
+    ? msgs
+        .filter((m) => !m.deleted_for_everyone && m.text.toLowerCase().includes(searchQuery.toLowerCase().trim()))
+        .map((m) => String(m.id))
+    : [];
+
+  const handleNextSearchMatch = () => {
+    if (matchedMsgIds.length === 0) return;
+    const nextIdx = (searchMatchIndex + 1) % matchedMsgIds.length;
+    setSearchMatchIndex(nextIdx);
+    const targetId = matchedMsgIds[nextIdx];
+    messageRefs.current[targetId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const handlePrevSearchMatch = () => {
+    if (matchedMsgIds.length === 0) return;
+    const prevIdx = (searchMatchIndex - 1 + matchedMsgIds.length) % matchedMsgIds.length;
+    setSearchMatchIndex(prevIdx);
+    const targetId = matchedMsgIds[prevIdx];
+    messageRefs.current[targetId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const renderHighlightedText = (content: string, isCurrentMatch: boolean) => {
+    if (!searchQuery.trim() || !content.toLowerCase().includes(searchQuery.toLowerCase().trim())) {
+      return <span>{content}</span>;
+    }
+    const query = searchQuery.trim();
+    const parts = content.split(new RegExp(`(${query})`, 'gi'));
+    return (
+      <span>
+        {parts.map((part, idx) =>
+          part.toLowerCase() === query.toLowerCase() ? (
+            <mark
+              key={idx}
+              className={`rounded px-0.5 text-black font-bold ${
+                isCurrentMatch ? 'bg-amber-300 ring-2 ring-amber-400' : 'bg-yellow-200/90'
+              }`}
+            >
+              {part}
+            </mark>
+          ) : (
+            <span key={idx}>{part}</span>
+          )
+        )}
+      </span>
+    );
+  };
 
   // Fetch real messages & listen to live broadcast and database changes
   useEffect(() => {
@@ -1206,9 +1262,86 @@ function ChatView({
             <span>{isPeerTyping ? "typing..." : (chat.online ? "online" : chat.handle)}</span>
           </div>
         </div>
+        <IconBtn label="Search in chat" onClick={() => {
+          setIsSearching(!isSearching);
+          setSearchQuery("");
+          setSearchMatchIndex(0);
+        }}>
+          <Search className="h-4 w-4" />
+        </IconBtn>
         <IconBtn label="Voice call" onClick={() => onStartCall("audio", chat)}><Phone className="h-4 w-4" /></IconBtn>
         <IconBtn label="Video call" onClick={() => onStartCall("video", chat)}><Video className="h-4 w-4" /></IconBtn>
       </div>
+
+      {/* Floating In-Chat Search Bar Header */}
+      <AnimatePresence>
+        {isSearching && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.16 }}
+            className="glass-strong border-b border-white/10 px-3 py-2 flex items-center gap-2 overflow-hidden"
+          >
+            <div className="flex-1 flex items-center gap-2 glass rounded-2xl px-3 py-1.5 text-xs">
+              <Search className="w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setSearchMatchIndex(0);
+                }}
+                placeholder="Search messages..."
+                className="w-full bg-transparent outline-none placeholder:text-muted-foreground text-foreground text-xs"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="p-0.5 text-muted-foreground hover:text-white cursor-pointer"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Match Counter & Up/Down Navigation Controls */}
+            {searchQuery.trim() && (
+              <div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground">
+                <span>
+                  {matchedMsgIds.length > 0 ? `${searchMatchIndex + 1}/${matchedMsgIds.length}` : '0/0'}
+                </span>
+                <button
+                  onClick={handlePrevSearchMatch}
+                  disabled={matchedMsgIds.length === 0}
+                  className="p-1 hover:bg-white/10 rounded disabled:opacity-30 cursor-pointer"
+                  title="Previous match"
+                >
+                  <ChevronUp className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleNextSearchMatch}
+                  disabled={matchedMsgIds.length === 0}
+                  className="p-1 hover:bg-white/10 rounded disabled:opacity-30 cursor-pointer"
+                  title="Next match"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                setIsSearching(false);
+                setSearchQuery("");
+              }}
+              className="p-1.5 text-muted-foreground hover:text-white rounded-xl hover:bg-white/5 cursor-pointer text-xs"
+            >
+              Cancel
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-4">
         {loading && msgs.length === 0 ? (
@@ -1285,7 +1418,10 @@ function ChatView({
                   </AnimatePresence>
 
                   {/* Swipe-to-Reply Container */}
-                  <div className={`relative flex items-center w-full ${m.me ? 'justify-end' : 'justify-start'}`}>
+                  <div 
+                    ref={(el) => { messageRefs.current[String(m.id)] = el; }}
+                    className={`relative flex items-center w-full ${m.me ? 'justify-end' : 'justify-start'}`}
+                  >
                     <motion.div 
                       layout 
                       drag="x"
@@ -1337,7 +1473,7 @@ function ChatView({
                           })} 
                         />
                       ) : (
-                        <span>{m.text}</span>
+                        <span>{renderHighlightedText(m.text, matchedMsgIds[searchMatchIndex] === String(m.id))}</span>
                       )}
 
                       <span className={`ml-2 inline-flex items-center gap-1 align-bottom text-[10px] ${m.me ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
