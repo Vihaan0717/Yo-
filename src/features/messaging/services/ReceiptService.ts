@@ -39,15 +39,17 @@ export class ReceiptService {
       });
     };
 
+    // Fire instant realtime notification without waiting for network DB roundtrip
+    notifyDelivery();
+
     try {
-      // 1. Try server RPC
+      // 1. Try server RPC in background
       const { data, error } = await supabase.rpc('acknowledge_delivery', {
         p_conversation_id: conversationId,
         p_message_ids: messageIds
       });
 
       if (!error && typeof data === 'number') {
-        notifyDelivery();
         return data;
       }
 
@@ -60,13 +62,12 @@ export class ReceiptService {
         }));
 
         await supabase.from('message_receipts').upsert(rows, { onConflict: 'message_id,user_id' });
-        notifyDelivery();
         return messageIds.length;
       }
 
       return 0;
     } catch (err) {
-      console.warn('Failed to acknowledge delivery:', err);
+      console.warn('Failed to acknowledge delivery in DB:', err);
       return 0;
     }
   }
@@ -110,15 +111,17 @@ export class ReceiptService {
       });
     };
 
+    // Immediately dispatch read broadcast without waiting for DB update
+    notifyRead(maxSequence);
+
     try {
-      // 1. Try server RPC
+      // 1. Try server RPC in background
       const { data, error } = await supabase.rpc('acknowledge_conversation_read', {
         p_conversation_id: conversationId,
         p_max_sequence: maxSequence || 0
       });
 
       if (!error && data) {
-        notifyRead(data.current_sequence || maxSequence);
         return true;
       }
 
@@ -129,7 +132,6 @@ export class ReceiptService {
           .update({ last_read_at: new Date().toISOString() })
           .match({ conversation_id: conversationId, user_id: user.id });
 
-        notifyRead(maxSequence);
         return true;
       }
 
