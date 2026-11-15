@@ -20,8 +20,7 @@ import {
   User, 
   ChevronRight, 
   CheckCheck,
-  LogOut,
-  Reply
+  LogOut
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -1173,13 +1172,6 @@ function ChatView({
 
                   {/* Swipe-to-Reply Container */}
                   <div className={`relative flex items-center w-full ${m.me ? 'justify-end' : 'justify-start'}`}>
-                    {/* Background Reply Icon Indicator that reveals on swipe */}
-                    <div 
-                      className={`absolute ${m.me ? 'right-full mr-2' : 'left-0 ml-1'} flex items-center justify-center w-8 h-8 rounded-full glass-strong text-primary pointer-events-none transition-opacity`}
-                    >
-                      <Reply className="w-4 h-4" />
-                    </div>
-
                     <motion.div 
                       layout 
                       drag="x"
