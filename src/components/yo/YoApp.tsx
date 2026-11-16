@@ -35,7 +35,8 @@ import {
   Wand2,
   Loader2,
   Check,
-  Palette
+  Palette,
+  Info
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -60,6 +61,7 @@ import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
 import { ChatContactInfoDrawer } from "../modals/ChatContactInfoDrawer";
 import { ProfileViewerModal } from "../modals/ProfileViewerModal";
 import { ThemePreferenceModal, type ThemePreference } from "../modals/ThemePreferenceModal";
+import { AboutUsModal } from "../modals/AboutUsModal";
 import { UpdatesHomeScreen } from "../../features/status/components/UpdatesHomeScreen";
 import { AddStatusModal } from "../../features/status/components/AddStatusModal";
 import { StatusViewerModal } from "../../features/status/components/StatusViewerModal";
@@ -645,13 +647,15 @@ function SettingsTab({
   onOpenNotifications,
   onOpenProfile,
   themePref,
-  onOpenTheme
+  onOpenTheme,
+  onOpenAboutUs
 }: { 
   onOpenAuth: () => void; 
   onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
   themePref: ThemePreference;
   onOpenTheme: () => void;
+  onOpenAboutUs: () => void;
 }) {
   const { user, signOut } = useAuth();
   const hue = user?.username ? (user.username.charCodeAt(0) * 37) % 360 : 190;
@@ -706,7 +710,18 @@ function SettingsTab({
       label: "Privacy & Security", 
       sub: "End-to-end encryption, locked chats", 
       hue: 150 
-    }, 
+    },
+    { 
+      icon: Info, 
+      label: "About Us", 
+      sub: "LeafBubble by KannaLAB · CEO @kanna_xdev", 
+      hue: 195, 
+      action: () => {
+        SoundEffectsService.playDrawerOpen();
+        HapticsService.light();
+        onOpenAboutUs();
+      }
+    },
   ];
 
   return (
@@ -2685,6 +2700,7 @@ export function YoApp() {
   const [authOpen, setAuthOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [themeModalOpen, setThemeModalOpen] = useState(false);
+  const [aboutUsOpen, setAboutUsOpen] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [createStoryModalOpen, setCreateStoryModalOpen] = useState(false);
@@ -3258,6 +3274,7 @@ export function YoApp() {
                   onOpenProfile={() => setProfileModalOpen(true)}
                   themePref={themePref}
                   onOpenTheme={() => setThemeModalOpen(true)}
+                  onOpenAboutUs={() => setAboutUsOpen(true)}
                 />
               )}
             </motion.div>
@@ -3405,6 +3422,12 @@ export function YoApp() {
         onClose={() => setThemeModalOpen(false)}
         themePref={themePref}
         onSelectTheme={setThemePreference}
+      />
+
+      {/* About Us & Creator Portfolio Modal */}
+      <AboutUsModal
+        isOpen={aboutUsOpen}
+        onClose={() => setAboutUsOpen(false)}
       />
 
       {/* Global AI Voice Assistant & Notification Settings Modal */}
