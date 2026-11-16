@@ -52,6 +52,10 @@ import { AuthModal } from "../modals/AuthModal";
 import { CreateGroupModal } from "../modals/CreateGroupModal";
 import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
 import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
+import { StoriesTray } from "../stories/StoriesTray";
+import { CreateStoryModal } from "../stories/CreateStoryModal";
+import { StoryViewerModal } from "../stories/StoryViewerModal";
+import { StoryService, type UserStoryGroup } from "../../services/stories/StoryService";
 import { NotificationService } from "../../services/notifications/NotificationService";
 import { VoiceAssistantService } from "../../services/voice/VoiceAssistantService";
 import { useAuth } from "../../contexts/AuthContext";
@@ -160,12 +164,20 @@ function ChatsTab({
   chatsList, 
   onOpen, 
   onNewChat,
-  onNewGroup
+  onNewGroup,
+  storyGroups,
+  currentUserId,
+  onOpenStory,
+  onAddStory
 }: { 
   chatsList: Chat[]; 
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
+  storyGroups: UserStoryGroup[];
+  currentUserId?: string;
+  onOpenStory: (groupIndex: number) => void;
+  onAddStory: () => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = chatsList.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase()));
@@ -185,6 +197,15 @@ function ChatsTab({
           </div>
         } 
       />
+
+      {/* 24-Hour Stories / Status Updates Tray */}
+      <StoriesTray
+        groups={storyGroups}
+        currentUserId={currentUserId}
+        onOpenStory={onOpenStory}
+        onAddStory={onAddStory}
+      />
+
       <SearchBar value={search} onChange={setSearch} />
       <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
         {filtered.map((c) => (
@@ -2155,6 +2176,10 @@ export function YoApp() {
   const [authOpen, setAuthOpen] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
+  const [createStoryModalOpen, setCreateStoryModalOpen] = useState(false);
+  const [viewerStoryModalOpen, setViewerStoryModalOpen] = useState(false);
+  const [selectedStoryGroupIndex, setSelectedStoryGroupIndex] = useState(0);
+  const [storyGroups, setStoryGroups] = useState<UserStoryGroup[]>([]);
   const [chatsList, setChatsList] = useState<Chat[]>([]);
   const chatsListRef = useRef<Chat[]>([]);
   useEffect(() => {
@@ -2302,8 +2327,18 @@ export function YoApp() {
     }
   };
 
+  const refreshStories = async () => {
+    try {
+      const groups = await StoryService.getActiveStories(user?.id);
+      setStoryGroups(groups);
+    } catch (err) {
+      console.warn("Failed to load stories:", err);
+    }
+  };
+
   useEffect(() => {
     refreshConversations();
+    refreshStories();
 
     // Global listener for new messages & typing when user is on the chat list
     const globalChannel = supabase
@@ -2556,6 +2591,19 @@ export function YoApp() {
               {tab === "chats" && (
                 <ChatsTab 
                   chatsList={chatsList} 
+                  storyGroups={storyGroups}
+                  currentUserId={user?.id}
+                  onOpenStory={(groupIndex) => {
+                    setSelectedStoryGroupIndex(groupIndex);
+                    setViewerStoryModalOpen(true);
+                  }}
+                  onAddStory={() => {
+                    if (!user) {
+                      setAuthOpen(true);
+                      return;
+                    }
+                    setCreateStoryModalOpen(true);
+                  }}
                   onOpen={(c) => {
                     openRef.current = c;
                     setLocalLastRead(user?.id, c.id);
@@ -2640,6 +2688,41 @@ export function YoApp() {
           onToggleVideo={() => setIsVideoMuted(!isVideoMuted)}
           localStream={localStream}
           remoteStream={remoteStream}
+        />
+      )}
+
+      {/* Create New Story Modal */}
+      {user && (
+        <CreateStoryModal
+          isOpen={createStoryModalOpen}
+          onClose={() => setCreateStoryModalOpen(false)}
+          userId={user.id}
+          userProfile={{
+            display_name: user.display_name || user.username || 'You',
+            username: user.username || 'me',
+            avatar_url: ''
+          }}
+          onStoryCreated={() => refreshStories()}
+        />
+      )}
+
+      {/* Story Viewer Modal */}
+      {viewerStoryModalOpen && storyGroups.length > 0 && (
+        <StoryViewerModal
+          groups={storyGroups}
+          initialGroupIndex={selectedStoryGroupIndex}
+          currentUserId={user?.id}
+          onClose={() => {
+            setViewerStoryModalOpen(false);
+            refreshStories();
+          }}
+          onReplyToStory={(storyAuthorId, _storySnippet, _replyText) => {
+            // Find chat with this author or start direct chat
+            const existing = chatsList.find((c) => c.target_user_id === storyAuthorId || c.id === storyAuthorId);
+            if (existing) {
+              setOpen(existing);
+            }
+          }}
         />
       )}
 
