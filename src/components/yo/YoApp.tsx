@@ -1034,6 +1034,7 @@ function ChatView({
         id: clientMessageId,
         conversation_id: chat.id,
         sender_id: user.id,
+        sender_name: user.display_name || user.username || 'Friend',
         content: "🎤 Voice message",
         message_type: 'audio',
         time: nowTime
@@ -1129,6 +1130,7 @@ function ChatView({
           id: clientMessageId,
           conversation_id: chat.id,
           sender_id: user.id,
+          sender_name: user.display_name || user.username || 'Friend',
           content: "📷 Photo",
           message_type: 'image',
           time: nowTime
@@ -1230,6 +1232,7 @@ function ChatView({
             id: clientMessageId,
             conversation_id: chat.id,
             sender_id: user.id,
+            sender_name: user.display_name || user.username || 'Friend',
             content: "🎥 Video",
             message_type: 'video',
             time: nowTime
@@ -1330,6 +1333,7 @@ function ChatView({
             id: clientMessageId,
             conversation_id: chat.id,
             sender_id: user.id,
+            sender_name: user.display_name || user.username || 'Friend',
             content: `📎 ${file.name}`,
             message_type: 'file',
             time: nowTime
@@ -1460,6 +1464,7 @@ function ChatView({
         id: clientMessageId,
         conversation_id: chat.id,
         sender_id: user.id,
+        sender_name: user.display_name || user.username || 'Friend',
         content,
         time: nowTime
       }
@@ -2151,6 +2156,10 @@ export function YoApp() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [chatsList, setChatsList] = useState<Chat[]>([]);
+  const chatsListRef = useRef<Chat[]>([]);
+  useEffect(() => {
+    chatsListRef.current = chatsList;
+  }, [chatsList]);
 
   // WebRTC Calling state
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
@@ -2327,7 +2336,7 @@ export function YoApp() {
 
           // Fire local notification if user is outside this chat or app is in background
           if (!isCurrentlyReading) {
-            const senderName = chatsList.find((c) => c.id === targetConvId)?.name || 'Someone';
+            const senderName = msg.sender_name || chatsListRef.current.find((c) => c.id === targetConvId)?.name || 'Someone';
             NotificationService.showIncomingMessage({
               title: `Yo!!! ${senderName}`,
               body: preview,
@@ -2339,7 +2348,8 @@ export function YoApp() {
               chatId: targetConvId,
               senderName,
               content: preview,
-              time: timeStr
+              time: timeStr,
+              messageId: msg.id ? String(msg.id) : undefined
             });
           }
 
@@ -2403,7 +2413,7 @@ export function YoApp() {
 
           // Fire local notification if user is outside this chat or app is in background
           if (!isCurrentlyReading) {
-            const senderName = chatsList.find((c) => c.id === targetConvId)?.name || 'Someone';
+            const senderName = newMsg.sender_name || chatsListRef.current.find((c) => c.id === targetConvId)?.name || 'Someone';
             NotificationService.showIncomingMessage({
               title: `Yo!!! ${senderName}`,
               body: preview,
@@ -2415,7 +2425,8 @@ export function YoApp() {
               chatId: targetConvId,
               senderName,
               content: preview,
-              time: timeStr
+              time: timeStr,
+              messageId: newMsg.id ? String(newMsg.id) : undefined
             });
           }
 

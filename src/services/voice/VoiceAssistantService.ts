@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS: VoiceAssistantSettings = {
 
 export class VoiceAssistantService {
   private static audioCtx: AudioContext | null = null;
+  private static recentAnnouncements = new Map<string, number>();
 
   private static getAudioContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
@@ -244,13 +245,32 @@ export class VoiceAssistantService {
     chatId,
     senderName,
     content,
-    time
+    time,
+    messageId
   }: {
     chatId: string;
     senderName: string;
     content: string;
     time?: string;
+    messageId?: string;
   }) {
+    // 1. Strict deduplication key: prevents duplicate announcements from simultaneous broadcast + DB insert
+    const dedupeKey = messageId ? `${chatId}_${messageId}` : `${chatId}_${content}`;
+    const now = Date.now();
+    const lastSpoken = this.recentAnnouncements.get(dedupeKey);
+    if (lastSpoken && now - lastSpoken < 5000) {
+      // Already alerted for this message within 5 seconds
+      return;
+    }
+    this.recentAnnouncements.set(dedupeKey, now);
+
+    // Clean up cache
+    if (this.recentAnnouncements.size > 100) {
+      for (const [k, ts] of this.recentAnnouncements.entries()) {
+        if (now - ts > 10000) this.recentAnnouncements.delete(k);
+      }
+    }
+
     const chatConfig = this.getChatConfig(chatId);
     if (chatConfig.muted) return;
 
@@ -261,6 +281,7 @@ export class VoiceAssistantService {
         : globalSettings.voiceAnnounceEnabled;
 
     const displayTime = time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const cleanSender = senderName && senderName !== 'Someone' ? senderName : 'A contact';
 
     if (shouldVoiceAnnounce) {
       // 1. Play quick subtle cue tone first
@@ -275,8 +296,8 @@ export class VoiceAssistantService {
       else if (cleanContent.length > 70) cleanContent = cleanContent.slice(0, 70) + '...';
 
       const announcement = globalSettings.readMessageContent
-        ? `You have a message from ${senderName} at ${displayTime}: "${cleanContent}"`
-        : `You have a new message from ${senderName} at ${displayTime}`;
+        ? `You have a message from ${cleanSender} at ${displayTime}: "${cleanContent}"`
+        : `You have a new message from ${cleanSender} at ${displayTime}`;
 
       // Short delay so chime finishes cleanly before speech starts
       setTimeout(() => {
