@@ -146,23 +146,24 @@ export const ChatContactInfoDrawer: React.FC<ChatContactInfoDrawerProps> = ({
           transition={{ type: 'spring', damping: 32, stiffness: 360 }}
           className="relative w-full max-w-md h-full bg-background text-foreground border-l border-border flex flex-col z-10 overflow-hidden shadow-2xl"
         >
-          {/* Sticky Header with Back Chevron */}
-          <div className="glass-strong px-3 py-3 flex items-center justify-between border-b border-border shrink-0">
-            <button
-              onClick={() => {
-                HapticsService.light();
-                onClose();
-              }}
-              aria-label="Back"
-              className="flex items-center text-primary cursor-pointer active:scale-90 transition-transform p-1"
-            >
-              <ChevronLeft className="h-7 w-7" />
-            </button>
-            <span className="font-semibold text-base tracking-tight text-foreground">
-              {isGroup ? "Group info" : "Contact info"}
-            </span>
-            <div className="w-7" />
-          </div>
+            {/* Sticky Header with Back Chevron */}
+            <div className="glass-strong px-3 py-3 flex items-center justify-between border-b border-border shrink-0">
+              <button
+                onClick={() => {
+                  HapticsService.light();
+                  SoundEffectsService.playDrawerClose();
+                  onClose();
+                }}
+                aria-label="Back"
+                className="flex items-center text-primary cursor-pointer active:scale-90 transition-transform p-1"
+              >
+                <ChevronLeft className="h-7 w-7" />
+              </button>
+              <span className="font-semibold text-base tracking-tight text-foreground">
+                {isGroup ? "Group info" : "Contact info"}
+              </span>
+              <div className="w-7" />
+            </div>
 
           <div className="no-scrollbar flex-1 overflow-y-auto pb-10 space-y-4 px-4 pt-4">
             {/* Hero Profile Photo & Identity */}
@@ -216,6 +217,7 @@ export const ChatContactInfoDrawer: React.FC<ChatContactInfoDrawerProps> = ({
                     active: isFavorite, 
                     onClick: () => {
                       HapticsService.medium();
+                      SoundEffectsService.playFavorite();
                       onToggleFavorite?.();
                     } 
                   }
@@ -314,7 +316,8 @@ export const ChatContactInfoDrawer: React.FC<ChatContactInfoDrawerProps> = ({
                 <button
                   onClick={() => {
                     HapticsService.medium();
-                    SoundEffectsService.playTap();
+                    if (!isLocked) SoundEffectsService.playToggleOn();
+                    else SoundEffectsService.playToggleOff();
                     onToggleLock?.();
                   }}
                   className={`flex h-7 w-12 rounded-full p-0.5 transition-colors cursor-pointer ${
@@ -335,7 +338,8 @@ export const ChatContactInfoDrawer: React.FC<ChatContactInfoDrawerProps> = ({
                 <button
                   onClick={() => {
                     HapticsService.medium();
-                    SoundEffectsService.playTap();
+                    if (!isArchived) SoundEffectsService.playToggleOn();
+                    else SoundEffectsService.playToggleOff();
                     onToggleArchive?.();
                   }}
                   className={`flex h-7 w-12 rounded-full p-0.5 transition-colors cursor-pointer ${
@@ -373,6 +377,7 @@ export const ChatContactInfoDrawer: React.FC<ChatContactInfoDrawerProps> = ({
                 label={isGroup ? "Exit group" : "Clear chat"} 
                 onClick={() => {
                   HapticsService.heavy();
+                  SoundEffectsService.playDelete();
                   onClearChat?.();
                 }} 
               />

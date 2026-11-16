@@ -11,9 +11,19 @@ describe('Audio-Haptic & iOS Experience Engine', () => {
     await expect(HapticsService.success()).resolves.not.toThrow();
   });
 
-  it('should play send, receive and tap sound effects without throwing exceptions', () => {
+  it('should play all UI & feedback sound effects without throwing exceptions', () => {
     expect(() => SoundEffectsService.playMessageSent()).not.toThrow();
     expect(() => SoundEffectsService.playMessageReceived()).not.toThrow();
     expect(() => SoundEffectsService.playTap()).not.toThrow();
+    expect(() => SoundEffectsService.playTabSwitch()).not.toThrow();
+    expect(() => SoundEffectsService.playChipSelect()).not.toThrow();
+    expect(() => SoundEffectsService.playToggleOn()).not.toThrow();
+    expect(() => SoundEffectsService.playToggleOff()).not.toThrow();
+    expect(() => SoundEffectsService.playDrawerOpen()).not.toThrow();
+    expect(() => SoundEffectsService.playDrawerClose()).not.toThrow();
+    expect(() => SoundEffectsService.playRecordStart()).not.toThrow();
+    expect(() => SoundEffectsService.playRecordStop()).not.toThrow();
+    expect(() => SoundEffectsService.playFavorite()).not.toThrow();
+    expect(() => SoundEffectsService.playDelete()).not.toThrow();
   });
 });

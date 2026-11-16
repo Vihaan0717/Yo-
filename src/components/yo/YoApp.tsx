@@ -35,7 +35,8 @@ import {
   Archive,
   Wand2,
   Loader2,
-  Check
+  Check,
+  Sun
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -184,6 +185,8 @@ function ChatsTab({
   archivedIds,
   lockedIds,
   favoritesIds,
+  isDarkGlass,
+  onToggleDarkGlass,
   onOpen, 
   onNewChat,
   onNewGroup,
@@ -193,6 +196,8 @@ function ChatsTab({
   archivedIds: string[];
   lockedIds: string[];
   favoritesIds: string[];
+  isDarkGlass: boolean;
+  onToggleDarkGlass: (val: boolean) => void;
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
@@ -299,6 +304,7 @@ function ChatsTab({
                 <button
                   onClick={() => {
                     HapticsService.light();
+                    SoundEffectsService.playDrawerOpen();
                     onOpenProfile?.();
                   }}
                   className="px-3 py-1.5 rounded-full glass hover:bg-white/10 text-xs font-semibold text-primary border border-primary/30 flex items-center gap-1.5 cursor-pointer shadow-sm"
@@ -307,6 +313,12 @@ function ChatsTab({
                   <User className="w-3.5 h-3.5" />
                   <span>Profile</span>
                 </button>
+                <IconBtn 
+                  label={isDarkGlass ? "Switch to Light Glass" : "Switch to Dark Glass"} 
+                  onClick={() => onToggleDarkGlass(!isDarkGlass)}
+                >
+                  {isDarkGlass ? <Sun className="h-4 w-4 text-primary" /> : <Moon className="h-4 w-4 text-primary" />}
+                </IconBtn>
                 <IconBtn label="New group" onClick={onNewGroup}>
                   <Users className="h-4 w-4" />
                 </IconBtn>
@@ -332,7 +344,7 @@ function ChatsTab({
                 whileTap={{ scale: 0.92 }} 
                 onClick={() => {
                   HapticsService.selection();
-                  SoundEffectsService.playTap();
+                  SoundEffectsService.playChipSelect();
                   setActiveFilter(x.id);
                 }}
                 className={`relative shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors cursor-pointer select-none ${
@@ -476,7 +488,11 @@ function ChatsTab({
               <motion.li key={c.id} variants={itemV}>
                 <motion.button 
                   whileTap={{ scale: 0.97 }} 
-                  onClick={() => onOpen(c)}
+                  onClick={() => {
+                    HapticsService.light();
+                    SoundEffectsService.playDrawerOpen();
+                    onOpen(c);
+                  }}
                   className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass cursor-pointer"
                 >
                   <div className="relative">
@@ -634,10 +650,18 @@ function PeopleTab({
   );
 }
 
-function Toggle({ initial = true }: { initial?: boolean }) {
-  const [on, setOn] = useState(initial);
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) {
   return (
-    <button aria-label="Toggle" onClick={() => setOn(!on)} className={`flex h-7 w-12 rounded-full p-0.5 transition-colors cursor-pointer ${on ? "bg-accent justify-end" : "bg-secondary justify-start"}`}>
+    <button 
+      aria-label="Toggle" 
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }} 
+      className={`flex h-7 w-12 rounded-full p-0.5 transition-colors cursor-pointer ${
+        checked ? "bg-accent justify-end" : "bg-secondary justify-start"
+      }`}
+    >
       <motion.span layout transition={spring} className="h-6 w-6 rounded-full bg-foreground shadow-glow" />
     </button>
   );
@@ -646,11 +670,15 @@ function Toggle({ initial = true }: { initial?: boolean }) {
 function SettingsTab({ 
   onOpenAuth, 
   onOpenNotifications,
-  onOpenProfile
+  onOpenProfile,
+  isDarkGlass,
+  onToggleDarkGlass
 }: { 
   onOpenAuth: () => void; 
   onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
+  isDarkGlass: boolean;
+  onToggleDarkGlass: (val: boolean) => void;
 }) {
   const { user, signOut } = useAuth();
   const hue = user?.username ? (user.username.charCodeAt(0) * 37) % 360 : 190;
@@ -676,12 +704,30 @@ function SettingsTab({
       action: onOpenNotifications 
     },
     { icon: Lock, label: "Privacy & Encryption", hue: 150 }, 
-    { icon: Moon, label: "Dark glass", hue: 270, toggle: true },
+    { 
+      icon: isDarkGlass ? Moon : Sun, 
+      label: isDarkGlass ? "Dark glass theme" : "Light glass theme", 
+      hue: 270, 
+      toggle: true,
+      checked: isDarkGlass,
+      onToggle: onToggleDarkGlass,
+      action: () => onToggleDarkGlass(!isDarkGlass)
+    },
   ];
 
   return (
     <>
-      <Header title="Settings" />
+      <Header 
+        title="Settings" 
+        right={
+          <IconBtn 
+            label="Toggle Dark Glass" 
+            onClick={() => onToggleDarkGlass(!isDarkGlass)}
+          >
+            {isDarkGlass ? <Sun className="h-4 w-4 text-primary" /> : <Moon className="h-4 w-4 text-primary" />}
+          </IconBtn>
+        }
+      />
       <motion.div 
         initial={{ opacity: 0, scale: 0.96 }} 
         animate={{ opacity: 1, scale: 1 }} 
@@ -732,7 +778,11 @@ function SettingsTab({
               <r.icon className="h-4 w-4 text-foreground" />
             </motion.span>
             <span className="flex-1 font-medium">{r.label}</span>
-            {r.toggle ? <Toggle /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+            {r.toggle ? (
+              <Toggle checked={r.checked!} onChange={r.onToggle!} />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            )}
           </motion.li>
         ))}
       </motion.ul>
@@ -2698,6 +2748,38 @@ export function YoApp() {
     });
   };
 
+  // Dark Glass Theme State & Global Sync
+  const [darkGlass, setDarkGlass] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('yo_dark_glass') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleDarkGlass = (val: boolean) => {
+    setDarkGlass(val);
+    try {
+      localStorage.setItem('yo_dark_glass', String(val));
+    } catch {}
+    if (val) {
+      document.documentElement.classList.add('dark');
+      SoundEffectsService.playToggleOn();
+    } else {
+      document.documentElement.classList.remove('dark');
+      SoundEffectsService.playToggleOff();
+    }
+    HapticsService.medium();
+  };
+
+  useEffect(() => {
+    if (darkGlass) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkGlass]);
+
   // WebRTC Calling state
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
   const [callingChat, setCallingChat] = useState<Profile | null>(null);
@@ -3087,15 +3169,15 @@ export function YoApp() {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#0d131f]">
+    <div className="relative min-h-screen overflow-hidden bg-background text-foreground transition-colors duration-300">
       {/* Dynamic ambient iOS light orbs for Glassmorphism backdrop */}
       <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="animate-blob absolute -left-20 top-10 h-80 w-80 rounded-full bg-[#0ea5e9]/25 blur-[90px]" />
-        <div className="animate-blob absolute right-[-60px] top-1/4 h-96 w-96 rounded-full bg-[#2dd4bf]/20 blur-[100px]" style={{ animationDelay: "-5s" }} />
-        <div className="animate-blob absolute bottom-10 left-1/4 h-80 w-80 rounded-full bg-[#8b5cf6]/20 blur-[110px]" style={{ animationDelay: "-9s" }} />
+        <div className="animate-blob absolute -left-20 top-10 h-80 w-80 rounded-full bg-primary/25 blur-3xl" />
+        <div className="animate-blob absolute right-[-60px] top-1/4 h-96 w-96 rounded-full bg-accent/20 blur-3xl" style={{ animationDelay: "-5s" }} />
+        <div className="animate-blob absolute bottom-10 left-1/4 h-80 w-80 rounded-full bg-chart-4/20 blur-3xl" style={{ animationDelay: "-9s" }} />
       </div>
 
-      <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-white/5 flex flex-col justify-between">
+      <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-border flex flex-col justify-between">
         <div className="h-full overflow-y-auto">
           <AnimatePresence mode="popLayout" initial={false}>
             <motion.div key={tab} initial={{ opacity: 0, y: 12, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
@@ -3106,6 +3188,8 @@ export function YoApp() {
                   archivedIds={archivedIds}
                   lockedIds={lockedIds}
                   favoritesIds={favoritesIds}
+                  isDarkGlass={darkGlass}
+                  onToggleDarkGlass={toggleDarkGlass}
                   onOpen={(c) => {
                     openRef.current = c;
                     setLocalLastRead(user?.id, c.id);
@@ -3159,6 +3243,8 @@ export function YoApp() {
                   onOpenAuth={() => setAuthOpen(true)} 
                   onOpenNotifications={() => setGlobalNotifModalOpen(true)} 
                   onOpenProfile={() => setProfileModalOpen(true)}
+                  isDarkGlass={darkGlass}
+                  onToggleDarkGlass={toggleDarkGlass}
                 />
               )}
             </motion.div>
@@ -3166,7 +3252,7 @@ export function YoApp() {
         </div>
 
         {/* Floating iOS Glass Bottom Navigation */}
-        <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5 border border-white/20 shadow-2xl backdrop-blur-2xl">
+        <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5 border border-border shadow-2xl backdrop-blur-2xl">
           {tabs.map((t) => {
             const active = tab === t.id;
             return (
@@ -3175,7 +3261,7 @@ export function YoApp() {
                 whileTap={{ scale: 0.88 }} 
                 onClick={() => {
                   HapticsService.light();
-                  SoundEffectsService.playTap();
+                  SoundEffectsService.playTabSwitch();
                   setTab(t.id);
                 }}
                 className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold cursor-pointer ${active ? "text-primary-foreground" : "text-muted-foreground"}`}
