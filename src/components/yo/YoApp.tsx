@@ -61,6 +61,8 @@ import { StatusService } from "../../features/status/services/StatusService";
 import type { UserStatusGroup, StatusContentType } from "../../features/status/types/status";
 import { NotificationService } from "../../services/notifications/NotificationService";
 import { VoiceAssistantService } from "../../services/voice/VoiceAssistantService";
+import { HapticsService } from "../../services/feedback/HapticsService";
+import { SoundEffectsService } from "../../services/feedback/SoundEffectsService";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../services/supabase/client";
 import type { CallSession, Profile } from "../../types";
@@ -93,11 +95,15 @@ function IconBtn({ children, onClick, label }: { children: React.ReactNode; onCl
   return (
     <motion.button 
       aria-label={label} 
-      onClick={onClick} 
+      onClick={() => {
+        HapticsService.light();
+        SoundEffectsService.playTap();
+        onClick?.();
+      }} 
       whileTap={{ scale: 0.85 }} 
       whileHover={{ scale: 1.08 }} 
       transition={spring}
-      className="glass grid h-10 w-10 place-items-center rounded-full text-foreground cursor-pointer"
+      className="glass-clear grid h-10 w-10 place-items-center rounded-full text-foreground cursor-pointer shadow-sm hover:bg-white/15 transition-colors"
     >
       {children}
     </motion.button>
@@ -694,6 +700,11 @@ function ChatView({
 
           setMsgs((prev) => {
             if (prev.some((m) => m.id === msg.id || (!m.me && (m.image_url === msg.content || m.video_url === msg.content || m.file_url === msg.content || m.audio_url === msg.content || m.text === msg.content)))) return prev;
+            
+            // Audio-haptic feedback for incoming message
+            SoundEffectsService.playMessageReceived();
+            HapticsService.light();
+
             const isAudio = msg.message_type === 'audio' || (typeof msg.content === 'string' && msg.content.startsWith('data:audio'));
             const isImage = msg.message_type === 'image' || (typeof msg.content === 'string' && msg.content.startsWith('data:image'));
             const isVideo = msg.message_type === 'video' || (typeof msg.content === 'string' && msg.content.startsWith('data:video'));
@@ -1018,6 +1029,8 @@ function ChatView({
     };
 
     setMsgs((m) => [...m, newEntry]);
+    SoundEffectsService.playMessageSent();
+    HapticsService.medium();
 
     // Broadcast audio payload to conversation channel
     if (channelRef.current) {
@@ -1112,6 +1125,8 @@ function ChatView({
 
       // 1. Instant local optimistic display
       setMsgs((m) => [...m, newEntry]);
+    SoundEffectsService.playMessageSent();
+    HapticsService.medium();
 
       // 2. Broadcast to peer room channel
       if (channelRef.current) {
@@ -1214,6 +1229,8 @@ function ChatView({
         };
 
         setMsgs((m) => [...m, newEntry]);
+    SoundEffectsService.playMessageSent();
+    HapticsService.medium();
 
         if (channelRef.current) {
           channelRef.current.send({
@@ -1315,6 +1332,8 @@ function ChatView({
         };
 
         setMsgs((m) => [...m, newEntry]);
+    SoundEffectsService.playMessageSent();
+    HapticsService.medium();
 
         if (channelRef.current) {
           channelRef.current.send({
@@ -1448,6 +1467,10 @@ function ChatView({
 
     // 1. Instant local display with 'sending' status
     setMsgs((m) => [...m, newEntry]);
+    SoundEffectsService.playMessageSent();
+    HapticsService.medium();
+    SoundEffectsService.playMessageSent();
+    HapticsService.medium();
 
     // 2. Broadcast to other peer (Send to both specific room AND global listener)
     if (channelRef.current) {
@@ -2639,12 +2662,20 @@ export function YoApp() {
         </div>
 
         {/* Floating iOS Glass Bottom Navigation */}
-        <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5">
+        <nav className="glass-strong absolute inset-x-4 bottom-5 z-20 flex justify-between rounded-[28px] p-1.5 border border-white/20 shadow-2xl backdrop-blur-2xl">
           {tabs.map((t) => {
             const active = tab === t.id;
             return (
-              <motion.button key={t.id} whileTap={{ scale: 0.88 }} onClick={() => setTab(t.id)}
-                className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold cursor-pointer ${active ? "text-primary-foreground" : "text-muted-foreground"}`}>
+              <motion.button 
+                key={t.id} 
+                whileTap={{ scale: 0.88 }} 
+                onClick={() => {
+                  HapticsService.light();
+                  SoundEffectsService.playTap();
+                  setTab(t.id);
+                }}
+                className={`relative flex flex-1 flex-col items-center gap-0.5 rounded-3xl py-2 text-[11px] font-semibold cursor-pointer ${active ? "text-primary-foreground" : "text-muted-foreground"}`}
+              >
                 {active && <motion.span layoutId="tab-pill" transition={spring} className="bg-brand absolute inset-0 rounded-3xl shadow-glow" />}
                 <motion.span className="relative" animate={active ? { y: [0, -5, 0], rotate: [0, -10, 0] } : { y: 0 }} transition={{ duration: 0.4 }}>
                   <t.icon className="h-5 w-5" strokeWidth={active ? 2.5 : 2} />
