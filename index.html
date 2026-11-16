@@ -11,7 +11,14 @@
     <script>
       (function() {
         try {
-          if (localStorage.getItem('yo_dark_glass') === 'true') {
+          var pref = localStorage.getItem('yo_theme_preference');
+          if (!pref) {
+            var legacy = localStorage.getItem('yo_dark_glass');
+            pref = legacy === 'true' ? 'dark' : (legacy === 'false' ? 'light' : 'system');
+            localStorage.setItem('yo_theme_preference', pref);
+          }
+          var systemDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (pref === 'dark' || (pref === 'system' && systemDark)) {
             document.documentElement.classList.add('dark');
           } else {
             document.documentElement.classList.remove('dark');

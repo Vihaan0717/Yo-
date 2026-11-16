@@ -15,6 +15,7 @@ interface AuthContextType {
   resendVerificationEmail: () => Promise<{ error?: string }>;
   resetPassword: (email: string) => Promise<{ error?: string }>;
   claimUsername: (username: string, displayName?: string) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (updates: Partial<Profile>) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
   switchDemoUser: (userIndex: 1 | 2) => void;
 }
@@ -302,6 +303,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return res;
   };
 
+  const updateProfile = async (updates: Partial<Profile>): Promise<{ error?: string }> => {
+    if (!user) return { error: 'No user signed in' };
+
+    setUser((prev) => prev ? { ...prev, ...updates } : null);
+
+    try {
+      if (!isDemoMode && isSupabaseConfigured) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({
+            ...updates,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', user.id);
+
+        if (error) {
+          console.error('Failed to update profile in database:', error);
+          return { error: error.message };
+        }
+
+        if (updates.avatar_url !== undefined || updates.display_name !== undefined) {
+          const authData: Record<string, any> = {};
+          if (updates.avatar_url !== undefined) authData.avatar_url = updates.avatar_url;
+          if (updates.display_name !== undefined) authData.display_name = updates.display_name;
+          await supabase.auth.updateUser({ data: authData }).catch(() => {});
+        }
+      }
+      return {};
+    } catch (err: any) {
+      console.warn('Profile update error:', err);
+      return { error: err.message || 'Failed to update profile' };
+    }
+  };
+
   const signOut = async () => {
     if (!isDemoMode) {
       await supabase.auth.signOut();
@@ -325,6 +360,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resendVerificationEmail,
         resetPassword,
         claimUsername,
+        updateProfile,
         signOut,
         switchDemoUser
       }}

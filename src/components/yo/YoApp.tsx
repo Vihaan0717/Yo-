@@ -16,7 +16,6 @@ import {
   PhoneOutgoing, 
   Bell, 
   Lock, 
-  Moon, 
   User, 
   ChevronRight, 
   CheckCheck,
@@ -36,7 +35,7 @@ import {
   Wand2,
   Loader2,
   Check,
-  Sun
+  Palette
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -60,6 +59,7 @@ import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
 import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
 import { ChatContactInfoDrawer } from "../modals/ChatContactInfoDrawer";
 import { ProfileViewerModal } from "../modals/ProfileViewerModal";
+import { ThemePreferenceModal, type ThemePreference } from "../modals/ThemePreferenceModal";
 import { UpdatesHomeScreen } from "../../features/status/components/UpdatesHomeScreen";
 import { AddStatusModal } from "../../features/status/components/AddStatusModal";
 import { StatusViewerModal } from "../../features/status/components/StatusViewerModal";
@@ -185,8 +185,6 @@ function ChatsTab({
   archivedIds,
   lockedIds,
   favoritesIds,
-  isDarkGlass,
-  onToggleDarkGlass,
   onOpen, 
   onNewChat,
   onNewGroup,
@@ -196,8 +194,6 @@ function ChatsTab({
   archivedIds: string[];
   lockedIds: string[];
   favoritesIds: string[];
-  isDarkGlass: boolean;
-  onToggleDarkGlass: (val: boolean) => void;
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
@@ -307,18 +303,12 @@ function ChatsTab({
                     SoundEffectsService.playDrawerOpen();
                     onOpenProfile?.();
                   }}
-                  className="px-3 py-1.5 rounded-full glass hover:bg-white/10 text-xs font-semibold text-primary border border-primary/30 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  className="px-3 py-1.5 rounded-full glass hover:bg-secondary text-xs font-semibold text-primary border border-primary/30 flex items-center gap-1.5 cursor-pointer shadow-sm"
                   title="My Profile Photo & Info"
                 >
                   <User className="w-3.5 h-3.5" />
                   <span>Profile</span>
                 </button>
-                <IconBtn 
-                  label={isDarkGlass ? "Switch to Light Glass" : "Switch to Dark Glass"} 
-                  onClick={() => onToggleDarkGlass(!isDarkGlass)}
-                >
-                  {isDarkGlass ? <Sun className="h-4 w-4 text-primary" /> : <Moon className="h-4 w-4 text-primary" />}
-                </IconBtn>
                 <IconBtn label="New group" onClick={onNewGroup}>
                   <Users className="h-4 w-4" />
                 </IconBtn>
@@ -650,35 +640,18 @@ function PeopleTab({
   );
 }
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) {
-  return (
-    <button 
-      aria-label="Toggle" 
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }} 
-      className={`flex h-7 w-12 rounded-full p-0.5 transition-colors cursor-pointer ${
-        checked ? "bg-accent justify-end" : "bg-secondary justify-start"
-      }`}
-    >
-      <motion.span layout transition={spring} className="h-6 w-6 rounded-full bg-foreground shadow-glow" />
-    </button>
-  );
-}
-
 function SettingsTab({ 
   onOpenAuth, 
   onOpenNotifications,
   onOpenProfile,
-  isDarkGlass,
-  onToggleDarkGlass
+  themePref,
+  onOpenTheme
 }: { 
   onOpenAuth: () => void; 
   onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
-  isDarkGlass: boolean;
-  onToggleDarkGlass: (val: boolean) => void;
+  themePref: ThemePreference;
+  onOpenTheme: () => void;
 }) {
   const { user, signOut } = useAuth();
   const hue = user?.username ? (user.username.charCodeAt(0) * 37) % 360 : 190;
@@ -695,52 +668,65 @@ function SettingsTab({
     online: true 
   };
 
+  const themeLabel =
+    themePref === 'system'
+      ? 'System default'
+      : themePref === 'dark'
+      ? 'Dark glass'
+      : 'Light glass';
+
   const rows = [
-    { icon: User, label: "Profile & Avatar", hue: 210, action: onOpenProfile || onOpenAuth }, 
+    { 
+      icon: User, 
+      label: "Profile", 
+      sub: "Name, photo, about", 
+      hue: 210, 
+      action: onOpenProfile || onOpenAuth 
+    }, 
     { 
       icon: Bell, 
-      label: "AI Voice Assistant & Sounds", 
+      label: "Notifications & Voice", 
+      sub: "AI voice announcer, sound alerts", 
       hue: 20, 
       action: onOpenNotifications 
     },
-    { icon: Lock, label: "Privacy & Encryption", hue: 150 }, 
     { 
-      icon: isDarkGlass ? Moon : Sun, 
-      label: isDarkGlass ? "Dark glass theme" : "Light glass theme", 
+      icon: Palette, 
+      label: "Theme & Preferences", 
+      sub: themeLabel, 
       hue: 270, 
-      toggle: true,
-      checked: isDarkGlass,
-      onToggle: onToggleDarkGlass,
-      action: () => onToggleDarkGlass(!isDarkGlass)
+      action: () => {
+        SoundEffectsService.playDrawerOpen();
+        HapticsService.light();
+        onOpenTheme();
+      }
     },
+    { 
+      icon: Lock, 
+      label: "Privacy & Security", 
+      sub: "End-to-end encryption, locked chats", 
+      hue: 150 
+    }, 
   ];
 
   return (
     <>
-      <Header 
-        title="Settings" 
-        right={
-          <IconBtn 
-            label="Toggle Dark Glass" 
-            onClick={() => onToggleDarkGlass(!isDarkGlass)}
-          >
-            {isDarkGlass ? <Sun className="h-4 w-4 text-primary" /> : <Moon className="h-4 w-4 text-primary" />}
-          </IconBtn>
-        }
-      />
+      <Header title="Settings" />
       <motion.div 
         initial={{ opacity: 0, scale: 0.96 }} 
         animate={{ opacity: 1, scale: 1 }} 
         transition={spring} 
         onClick={onOpenProfile}
-        className="glass mx-5 flex items-center justify-between gap-4 rounded-3xl p-4 cursor-pointer hover:bg-white/10 transition-colors"
+        className="glass mx-5 flex items-center justify-between gap-4 rounded-3xl p-4 cursor-pointer hover:bg-secondary/40 transition-colors"
       >
         <div className="flex items-center gap-3.5">
-          <Avatar chat={me} size={64} />
+          <Avatar chat={me} size={60} />
           <div>
-            <div className="text-lg font-bold">{me.name}</div>
-            <div className="text-sm text-muted-foreground">{me.handle} · ID {me.id.slice(0, 8)}</div>
-            <div className="text-[11px] text-teal-400 font-semibold mt-0.5">Tap to view & edit profile photo</div>
+            <div className="text-base font-bold text-foreground">{me.name}</div>
+            <div className="text-xs text-muted-foreground">{me.handle}</div>
+            <div className="text-[11px] text-primary font-medium mt-0.5 line-clamp-1">
+              {user?.status_status || user?.bio || "Hey there! I am using Yo!!!"}
+            </div>
           </div>
         </div>
         {user ? (
@@ -749,7 +735,7 @@ function SettingsTab({
               e.stopPropagation();
               signOut();
             }} 
-            className="p-2.5 rounded-2xl glass text-red-400 hover:bg-red-500/20 transition cursor-pointer"
+            className="p-2.5 rounded-2xl glass text-destructive hover:bg-destructive/10 transition cursor-pointer"
             title="Log Out"
           >
             <LogOut className="h-4 w-4" />
@@ -760,7 +746,7 @@ function SettingsTab({
               e.stopPropagation();
               onOpenAuth();
             }}
-            className="px-3.5 py-1.5 rounded-xl bg-brand text-primary-foreground font-semibold text-xs shadow-glow cursor-pointer"
+            className="px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-glow cursor-pointer"
           >
             Log In
           </button>
@@ -772,17 +758,16 @@ function SettingsTab({
             key={r.label} 
             variants={itemV} 
             onClick={r.action}
-            className="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-white/5 transition-colors"
+            className="flex items-center gap-3.5 px-4 py-3.5 cursor-pointer hover:bg-secondary/40 transition-colors"
           >
-            <motion.span whileHover={{ rotate: 12, scale: 1.1 }} className="grid h-8 w-8 place-items-center rounded-xl" style={{ background: `oklch(0.65 0.17 ${r.hue})` }}>
-              <r.icon className="h-4 w-4 text-foreground" />
+            <motion.span whileHover={{ rotate: 12, scale: 1.1 }} className="grid h-9 w-9 place-items-center rounded-2xl shadow-sm" style={{ background: `oklch(0.65 0.17 ${r.hue})` }}>
+              <r.icon className="h-4 w-4 text-white" />
             </motion.span>
-            <span className="flex-1 font-medium">{r.label}</span>
-            {r.toggle ? (
-              <Toggle checked={r.checked!} onChange={r.onToggle!} />
-            ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            )}
+            <div className="flex-1">
+              <div className="font-semibold text-sm text-foreground">{r.label}</div>
+              {r.sub && <div className="text-[11px] text-muted-foreground">{r.sub}</div>}
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </motion.li>
         ))}
       </motion.ul>
@@ -2688,7 +2673,7 @@ function ChatView({
 }
 
 export function YoApp() {
-  const { user } = useAuth();
+  const { user, updateProfile } = useAuth();
   const [tab, setTab] = useState<Tab>("chats");
   const [open, setOpen] = useState<Chat | null>(null);
   const openRef = useRef<Chat | null>(null);
@@ -2699,6 +2684,7 @@ export function YoApp() {
 
   const [authOpen, setAuthOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [themeModalOpen, setThemeModalOpen] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [createStoryModalOpen, setCreateStoryModalOpen] = useState(false);
@@ -2748,37 +2734,66 @@ export function YoApp() {
     });
   };
 
-  // Dark Glass Theme State & Global Sync
-  const [darkGlass, setDarkGlass] = useState<boolean>(() => {
+  // Theme Preference State ('system' | 'light' | 'dark')
+  const [themePref, setThemePref] = useState<ThemePreference>(() => {
     try {
-      return localStorage.getItem('yo_dark_glass') === 'true';
-    } catch {
-      return false;
-    }
+      const saved = localStorage.getItem('yo_theme_preference') as ThemePreference;
+      if (saved === 'system' || saved === 'light' || saved === 'dark') {
+        return saved;
+      }
+      const legacy = localStorage.getItem('yo_dark_glass');
+      if (legacy === 'true') return 'dark';
+      if (legacy === 'false') return 'light';
+    } catch {}
+    return 'system';
   });
 
-  const toggleDarkGlass = (val: boolean) => {
-    setDarkGlass(val);
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const applyTheme = () => {
+      let isDark = false;
+      if (themePref === 'dark') {
+        isDark = true;
+      } else if (themePref === 'light') {
+        isDark = false;
+      } else {
+        isDark = mediaQuery.matches;
+      }
+
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+
+    applyTheme();
+
+    const handleSystemChange = () => {
+      if (themePref === 'system') {
+        applyTheme();
+      }
+    };
+
+    mediaQuery.addEventListener?.('change', handleSystemChange);
+    return () => mediaQuery.removeEventListener?.('change', handleSystemChange);
+  }, [themePref]);
+
+  const setThemePreference = (pref: ThemePreference) => {
+    setThemePref(pref);
     try {
-      localStorage.setItem('yo_dark_glass', String(val));
+      localStorage.setItem('yo_theme_preference', pref);
     } catch {}
-    if (val) {
-      document.documentElement.classList.add('dark');
+    if (pref === 'dark') {
       SoundEffectsService.playToggleOn();
-    } else {
-      document.documentElement.classList.remove('dark');
+    } else if (pref === 'light') {
       SoundEffectsService.playToggleOff();
+    } else {
+      SoundEffectsService.playChipSelect();
     }
     HapticsService.medium();
   };
-
-  useEffect(() => {
-    if (darkGlass) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkGlass]);
 
   // WebRTC Calling state
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
@@ -3188,8 +3203,6 @@ export function YoApp() {
                   archivedIds={archivedIds}
                   lockedIds={lockedIds}
                   favoritesIds={favoritesIds}
-                  isDarkGlass={darkGlass}
-                  onToggleDarkGlass={toggleDarkGlass}
                   onOpen={(c) => {
                     openRef.current = c;
                     setLocalLastRead(user?.id, c.id);
@@ -3243,8 +3256,8 @@ export function YoApp() {
                   onOpenAuth={() => setAuthOpen(true)} 
                   onOpenNotifications={() => setGlobalNotifModalOpen(true)} 
                   onOpenProfile={() => setProfileModalOpen(true)}
-                  isDarkGlass={darkGlass}
-                  onToggleDarkGlass={toggleDarkGlass}
+                  themePref={themePref}
+                  onOpenTheme={() => setThemeModalOpen(true)}
                 />
               )}
             </motion.div>
@@ -3368,21 +3381,30 @@ export function YoApp() {
       {/* Auth Modal for Supabase user signup & signin */}
       <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
 
-      {/* User Profile Viewer & Avatar Editor */}
+      {/* User Profile Viewer & Avatar Editor (100% WhatsApp style) */}
       <ProfileViewerModal
         isOpen={profileModalOpen}
         user={user}
         onClose={() => setProfileModalOpen(false)}
         onUpdateAvatar={async (url) => {
-          if (user) {
-            await supabase
-              .from('profiles')
-              .update({ avatar_url: url, updated_at: new Date().toISOString() })
-              .eq('id', user.id);
-            user.avatar_url = url;
-            refreshConversations();
-          }
+          await updateProfile({ avatar_url: url });
+          refreshConversations();
         }}
+        onUpdateName={async (name) => {
+          await updateProfile({ display_name: name });
+          refreshConversations();
+        }}
+        onUpdateAbout={async (about) => {
+          await updateProfile({ status_status: about, bio: about });
+        }}
+      />
+
+      {/* Theme & Appearance Preference Modal */}
+      <ThemePreferenceModal
+        isOpen={themeModalOpen}
+        onClose={() => setThemeModalOpen(false)}
+        themePref={themePref}
+        onSelectTheme={setThemePreference}
       />
 
       {/* Global AI Voice Assistant & Notification Settings Modal */}

@@ -1,154 +1,412 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   X, 
   Camera, 
-  ShieldCheck, 
   Copy, 
-  Check
+  Check, 
+  Pencil, 
+  User, 
+  Smile, 
+  AtSign, 
+  Trash2, 
+  Loader2 
 } from 'lucide-react';
 import { Avatar } from '../yo/Avatar';
 import type { Profile } from '../../types';
 import { HapticsService } from '../../services/feedback/HapticsService';
+import { SoundEffectsService } from '../../services/feedback/SoundEffectsService';
+import { ImageService } from '../../services/media/ImageService';
 
 interface ProfileViewerModalProps {
   isOpen: boolean;
   user: Profile | null;
   onClose: () => void;
-  onUpdateAvatar?: (url: string) => void;
+  onUpdateAvatar?: (url: string) => Promise<void> | void;
+  onUpdateName?: (name: string) => Promise<void> | void;
+  onUpdateAbout?: (about: string) => Promise<void> | void;
 }
+
+const WHATSAPP_STATUS_PRESETS = [
+  'Available',
+  'Busy',
+  'At school',
+  'At the movies',
+  'At work',
+  'Battery about to die',
+  "Can't talk, Yo!!! only",
+  'In a meeting',
+  'At the gym',
+  'Sleeping',
+  'Urgent calls only'
+];
 
 export const ProfileViewerModal: React.FC<ProfileViewerModalProps> = ({
   isOpen,
   user,
   onClose,
-  onUpdateAvatar
+  onUpdateAvatar,
+  onUpdateName,
+  onUpdateAbout
 }) => {
   const [copied, setCopied] = useState(false);
-  const [isEditingPhoto, setIsEditingPhoto] = useState(false);
-  const [newPhotoUrl, setNewPhotoUrl] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Name editing
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+
+  // About editing
+  const [isEditingAbout, setIsEditingAbout] = useState(false);
+  const [aboutDraft, setAboutDraft] = useState('');
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen || !user) return null;
 
-  const copyHandle = () => {
+  const handleCopyHandle = () => {
     navigator.clipboard.writeText(`@${user.username}`);
     setCopied(true);
+    SoundEffectsService.playTap();
     HapticsService.light();
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleSavePhoto = () => {
-    if (newPhotoUrl.trim()) {
-      onUpdateAvatar?.(newPhotoUrl.trim());
-      setIsEditingPhoto(false);
+  const handlePickPhoto = () => {
+    SoundEffectsService.playTap();
+    HapticsService.light();
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      // High-quality client-side compression to lightweight WebP/JPEG (max 512px for avatars)
+      const processed = await ImageService.processImageFile(file, 512, 0.85);
+      await onUpdateAvatar?.(processed.dataUrl);
+      SoundEffectsService.playFavorite();
+      HapticsService.success();
+    } catch (err) {
+      console.error('Failed to process image:', err);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    SoundEffectsService.playDelete();
+    HapticsService.medium();
+    await onUpdateAvatar?.('');
+  };
+
+  const handleStartEditName = () => {
+    setNameDraft(user.display_name || '');
+    setIsEditingName(true);
+    SoundEffectsService.playTap();
+    HapticsService.light();
+  };
+
+  const handleSaveName = async () => {
+    if (nameDraft.trim() && nameDraft.trim() !== user.display_name) {
+      await onUpdateName?.(nameDraft.trim());
+      SoundEffectsService.playToggleOn();
       HapticsService.success();
     }
+    setIsEditingName(false);
+  };
+
+  const handleStartEditAbout = () => {
+    setAboutDraft(user.status_status || user.bio || 'Hey there! I am using Yo!!!');
+    setIsEditingAbout(true);
+    SoundEffectsService.playTap();
+    HapticsService.light();
+  };
+
+  const handleSaveAbout = async (customVal?: string) => {
+    const valToSave = customVal !== undefined ? customVal : aboutDraft;
+    if (valToSave.trim()) {
+      await onUpdateAbout?.(valToSave.trim());
+      SoundEffectsService.playToggleOn();
+      HapticsService.success();
+    }
+    setIsEditingAbout(false);
+  };
+
+  const handleSelectPreset = async (preset: string) => {
+    setAboutDraft(preset);
+    await handleSaveAbout(preset);
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
         <motion.div
           initial={{ opacity: 0, scale: 0.94, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.94, y: 15 }}
           transition={{ type: 'spring', damping: 28, stiffness: 350 }}
-          className="glass-panel w-full max-w-sm rounded-3xl p-6 relative overflow-hidden border border-white/10 shadow-2xl bg-[#0e1524]/90"
+          className="glass-strong w-full max-w-sm rounded-[32px] p-6 relative overflow-hidden border border-border shadow-2xl bg-card text-card-foreground max-h-[92vh] flex flex-col justify-between"
         >
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          {/* Profile Photo Header */}
-          <div className="flex flex-col items-center pt-2 pb-4">
-            <div className="relative group">
-              <Avatar
-                chat={{ name: user.display_name, hue: 210, avatar_url: user.avatar_url }}
-                size={110}
-              />
-              <button
-                onClick={() => setIsEditingPhoto(!isEditingPhoto)}
-                className="absolute bottom-1 right-1 p-2 rounded-full bg-brand text-primary-foreground shadow-glow hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-                title="Change Photo"
-              >
-                <Camera className="w-4 h-4" />
-              </button>
-            </div>
-
-            <h3 className="text-xl font-black text-white mt-4">{user.display_name}</h3>
-            
+          {/* Header */}
+          <div className="flex items-center justify-between pb-2 border-b border-border/40">
+            <h3 className="text-lg font-bold text-foreground">Profile</h3>
             <button
-              onClick={copyHandle}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full glass border border-white/10 text-xs font-semibold text-teal-300 mt-1.5 hover:bg-white/10 transition cursor-pointer"
+              onClick={() => {
+                SoundEffectsService.playDrawerClose();
+                HapticsService.light();
+                onClose();
+              }}
+              className="p-2 text-muted-foreground hover:text-foreground rounded-full hover:bg-secondary transition cursor-pointer"
             >
-              <span>@{user.username}</span>
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Edit photo URL input drawer */}
-          <AnimatePresence>
-            {isEditingPhoto && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mb-4 overflow-hidden"
-              >
-                <div className="glass rounded-2xl p-3 border border-teal-500/30 space-y-2">
-                  <label className="text-[11px] font-semibold text-slate-300">Avatar Image URL</label>
+          <div className="overflow-y-auto space-y-4 py-3 flex-1 pr-0.5">
+            {/* Profile Photo Section (WhatsApp Style) */}
+            <div className="flex flex-col items-center pt-2">
+              <div className="relative group">
+                <Avatar
+                  chat={{ name: user.display_name, hue: 210, avatar_url: user.avatar_url }}
+                  size={104}
+                  onClick={handlePickPhoto}
+                />
+
+                {/* Camera badge to choose from Gallery / Camera */}
+                <button
+                  type="button"
+                  onClick={handlePickPhoto}
+                  disabled={isUploading}
+                  className="absolute bottom-0 right-0 p-2.5 rounded-full bg-primary text-primary-foreground shadow-glow hover:scale-105 active:scale-95 transition-transform cursor-pointer border-2 border-card"
+                  title="Choose from gallery"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4" />
+                  )}
+                </button>
+
+                {/* Hidden native image file picker */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+              </div>
+
+              {/* Photo action pills */}
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={handlePickPhoto}
+                  disabled={isUploading}
+                  className="px-3 py-1 rounded-full text-xs font-semibold glass border border-border text-primary hover:bg-primary/10 transition cursor-pointer"
+                >
+                  Choose photo
+                </button>
+                {Boolean(user.avatar_url) && (
+                  <button
+                    onClick={handleRemovePhoto}
+                    className="px-3 py-1 rounded-full text-xs font-semibold glass border border-destructive/30 text-destructive hover:bg-destructive/10 transition cursor-pointer flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Remove</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Name Section (WhatsApp style with edit pencil & disclaimer) */}
+            <div className="glass rounded-2xl p-3.5 border border-border">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2 text-primary">
+                  <User className="w-4 h-4" />
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Name
+                  </span>
+                </div>
+                {!isEditingName && (
+                  <button
+                    onClick={handleStartEditName}
+                    className="p-1 rounded-lg text-primary hover:bg-primary/10 transition cursor-pointer"
+                    title="Edit Name"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {isEditingName ? (
+                <div className="space-y-2 mt-2">
                   <input
-                    type="url"
-                    value={newPhotoUrl}
-                    onChange={(e) => setNewPhotoUrl(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="glass w-full px-3 py-2 rounded-xl text-xs text-white outline-none placeholder:text-slate-500"
+                    type="text"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    maxLength={32}
+                    className="w-full px-3 py-2 rounded-xl text-sm bg-secondary text-foreground outline-none border border-primary/40 focus:border-primary"
+                    placeholder="Enter your name"
+                    autoFocus
                   />
-                  <div className="flex gap-2 justify-end pt-1">
+                  <div className="flex justify-end gap-2">
                     <button
-                      onClick={() => setIsEditingPhoto(false)}
-                      className="px-3 py-1 text-xs text-slate-400 hover:text-white cursor-pointer"
+                      onClick={() => setIsEditingName(false)}
+                      className="px-3 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:bg-secondary cursor-pointer"
                     >
                       Cancel
                     </button>
                     <button
-                      onClick={handleSavePhoto}
-                      className="px-3.5 py-1 text-xs font-bold rounded-lg bg-brand text-primary-foreground shadow-glow cursor-pointer"
+                      onClick={handleSaveName}
+                      className="px-3.5 py-1 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-glow cursor-pointer"
                     >
                       Save
                     </button>
                   </div>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              ) : (
+                <div className="text-base font-bold text-foreground">
+                  {user.display_name}
+                </div>
+              )}
 
-          {/* User Info Details List */}
-          <div className="space-y-2.5 pt-2">
-            <div className="glass rounded-2xl p-3 border border-white/5">
-              <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">
-                About / Status
-              </span>
-              <p className="text-xs text-slate-200">
-                {user.status_status || user.bio || 'Hey there! I am using Yo!!!'}
+              <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
+                This is not your username or pin. This name will be visible to your Yo!!! contacts.
               </p>
             </div>
 
-            <div className="glass rounded-2xl p-3 border border-white/5 flex items-center justify-between">
-              <div>
-                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-0.5">
-                  Permanent Yo!!! ID
-                </span>
-                <span className="text-xs font-mono text-slate-300">
-                  {user.id ? `${user.id.slice(0, 14)}...` : 'N/A'}
-                </span>
+            {/* About Section (WhatsApp Style) */}
+            <div className="glass rounded-2xl p-3.5 border border-border">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2 text-primary">
+                  <Smile className="w-4 h-4" />
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    About
+                  </span>
+                </div>
+                {!isEditingAbout && (
+                  <button
+                    onClick={handleStartEditAbout}
+                    className="p-1 rounded-lg text-primary hover:bg-primary/10 transition cursor-pointer"
+                    title="Edit About"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
-              <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+
+              {isEditingAbout ? (
+                <div className="space-y-2.5 mt-2">
+                  <div>
+                    <input
+                      type="text"
+                      value={aboutDraft}
+                      onChange={(e) => setAboutDraft(e.target.value)}
+                      maxLength={139}
+                      className="w-full px-3 py-2 rounded-xl text-xs bg-secondary text-foreground outline-none border border-primary/40 focus:border-primary"
+                      placeholder="Write your bio..."
+                      autoFocus
+                    />
+                    <div className="text-right text-[10px] text-muted-foreground mt-0.5">
+                      {139 - aboutDraft.length}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setIsEditingAbout(false)}
+                      className="px-3 py-1 rounded-lg text-xs font-medium text-muted-foreground hover:bg-secondary cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleSaveAbout()}
+                      className="px-3.5 py-1 rounded-lg text-xs font-bold bg-primary text-primary-foreground shadow-glow cursor-pointer"
+                    >
+                      Save
+                    </button>
+                  </div>
+
+                  {/* Standard WhatsApp Status Presets */}
+                  <div className="pt-2 border-t border-border/40">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider block mb-1.5">
+                      Select About
+                    </span>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                      {WHATSAPP_STATUS_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => handleSelectPreset(preset)}
+                          className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-primary/10 transition-colors flex items-center justify-between text-foreground cursor-pointer"
+                        >
+                          <span>{preset}</span>
+                          {user.status_status === preset && (
+                            <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-foreground font-medium">
+                  {user.status_status || user.bio || 'Hey there! I am using Yo!!!'}
+                </div>
+              )}
             </div>
+
+            {/* Username Section (WhatsApp Handle with Copy) */}
+            <div className="glass rounded-2xl p-3.5 border border-border flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-primary mb-1">
+                  <AtSign className="w-4 h-4" />
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Username
+                  </span>
+                </div>
+                <div className="text-sm font-semibold text-primary">
+                  @{user.username}
+                </div>
+              </div>
+
+              <button
+                onClick={handleCopyHandle}
+                className="p-2 rounded-xl glass border border-border text-foreground hover:bg-secondary transition cursor-pointer flex items-center gap-1.5 text-xs font-medium"
+                title="Copy username"
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-accent" />
+                    <span className="text-accent text-[11px] font-bold">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span className="text-[11px] text-muted-foreground">Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Bottom dismiss button */}
+          <div className="pt-2 border-t border-border/40">
+            <button
+              onClick={() => {
+                SoundEffectsService.playDrawerClose();
+                HapticsService.light();
+                onClose();
+              }}
+              className="w-full py-2.5 rounded-2xl bg-secondary text-foreground text-xs font-bold hover:bg-secondary/80 active:scale-98 transition cursor-pointer"
+            >
+              Done
+            </button>
           </div>
         </motion.div>
       </div>
