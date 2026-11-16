@@ -31,7 +31,8 @@ import {
   FileText,
   Film,
   Image as ImageIcon,
-  CircleDashed
+  CircleDashed,
+  Archive
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -53,6 +54,8 @@ import { AuthModal } from "../modals/AuthModal";
 import { CreateGroupModal } from "../modals/CreateGroupModal";
 import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
 import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
+import { ChatContactInfoDrawer } from "../modals/ChatContactInfoDrawer";
+import { ProfileViewerModal } from "../modals/ProfileViewerModal";
 import { UpdatesHomeScreen } from "../../features/status/components/UpdatesHomeScreen";
 import { AddStatusModal } from "../../features/status/components/AddStatusModal";
 import { StatusViewerModal } from "../../features/status/components/StatusViewerModal";
@@ -77,6 +80,7 @@ export type Chat = {
   unread: number; 
   online: boolean; 
   typing?: boolean;
+  avatar_url?: string;
   target_user_id?: string;
   type?: 'direct' | 'group';
 };
@@ -174,62 +178,185 @@ function ChatsTab({
   chatsList, 
   onOpen, 
   onNewChat,
-  onNewGroup
+  onNewGroup,
+  onOpenProfile
 }: { 
   chatsList: Chat[]; 
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
+  onOpenProfile?: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const filtered = chatsList.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase()));
+  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'favorites' | 'groups'>('all');
+  const [archivedOpen, setArchivedOpen] = useState(false);
+
+  // Local storage for archived and locked chats
+  const [archivedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('yo_archived_chats') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const [lockedIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('yo_locked_chats') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const filterChips: Array<{ id: 'all' | 'unread' | 'favorites' | 'groups'; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'unread', label: 'Unread' },
+    { id: 'favorites', label: 'Favorites' },
+    { id: 'groups', label: 'Groups' },
+  ];
+
+  // Base list separated by archive
+  const activeChats = chatsList.filter((c) => !archivedIds.includes(c.id));
+  const archivedChats = chatsList.filter((c) => archivedIds.includes(c.id));
+
+  const listToFilter = archivedOpen ? archivedChats : activeChats;
+
+  const filtered = listToFilter.filter(c => {
+    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase());
+    if (!matchesSearch) return false;
+
+    if (activeFilter === 'unread') return c.unread > 0;
+    if (activeFilter === 'groups') return c.type === 'group';
+    if (activeFilter === 'favorites') return c.online || c.unread > 0;
+    return true;
+  });
 
   return (
     <>
       <Header 
-        title="Chats" 
+        title={archivedOpen ? "Archived" : "Chats"} 
         right={
-          <div className="flex items-center gap-1">
-            <IconBtn label="New group" onClick={onNewGroup}>
-              <Users className="h-4 w-4" />
-            </IconBtn>
-            <IconBtn label="New chat" onClick={onNewChat}>
-              <PenSquare className="h-4 w-4" />
-            </IconBtn>
+          <div className="flex items-center gap-1.5">
+            {archivedOpen ? (
+              <button
+                onClick={() => setArchivedOpen(false)}
+                className="px-3 py-1.5 rounded-full glass text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+              >
+                Back
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={onOpenProfile}
+                  className="px-2.5 py-1 rounded-full glass hover:bg-white/10 text-xs font-medium text-teal-300 border border-teal-500/30 flex items-center gap-1 cursor-pointer"
+                  title="My Profile"
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>Profile</span>
+                </button>
+                <IconBtn label="New group" onClick={onNewGroup}>
+                  <Users className="h-4 w-4" />
+                </IconBtn>
+                <IconBtn label="New chat" onClick={onNewChat}>
+                  <PenSquare className="h-4 w-4" />
+                </IconBtn>
+              </>
+            )}
           </div>
         } 
       />
 
       <SearchBar value={search} onChange={setSearch} />
+
+      {/* WhatsApp Filter Chips (All, Unread, Favorites, Groups) */}
+      {!archivedOpen && (
+        <div className="flex items-center gap-1.5 px-5 pb-3 overflow-x-auto scrollbar-none">
+          {filterChips.map((chip) => {
+            const isActive = activeFilter === chip.id;
+            return (
+              <button
+                key={chip.id}
+                onClick={() => {
+                  HapticsService.selection();
+                  setActiveFilter(chip.id);
+                }}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+                    : 'glass text-slate-400 hover:text-white border border-white/5'
+                }`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* WhatsApp-Style Archived Row Banner */}
+      {!archivedOpen && archivedChats.length > 0 && (
+        <div className="px-4 pb-2">
+          <button
+            onClick={() => {
+              HapticsService.light();
+              setArchivedOpen(true);
+            }}
+            className="w-full flex items-center justify-between p-3 rounded-2xl glass hover:bg-white/10 transition cursor-pointer text-left border border-white/10"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center">
+                <Archive className="w-4 h-4" />
+              </div>
+              <span className="text-xs font-bold text-white">Archived Chats</span>
+            </div>
+            <span className="text-xs text-slate-400 font-mono">{archivedChats.length}</span>
+          </button>
+        </div>
+      )}
+
       <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
-        {filtered.map((c) => (
-          <motion.li key={c.id} variants={itemV}>
-            <motion.button 
-              whileTap={{ scale: 0.97 }} 
-              onClick={() => onOpen(c)}
-              className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass cursor-pointer"
-            >
-              <div className="relative">
-                <Avatar chat={c} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-semibold">{c.name}</span>
-                  <span className={`text-xs ${c.unread ? "text-primary font-medium" : "text-muted-foreground"}`}>{c.time}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  {c.typing ? <Typing /> : <span className="truncate text-sm text-muted-foreground">{c.last || "No messages yet"}</span>}
-                  {c.unread > 0 && (
-                    <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...spring, delay: 0.2 }}
-                      className="bg-brand grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-bold text-primary-foreground shadow-glow">
-                      {c.unread > 99 ? '99+' : c.unread}
-                    </motion.span>
-                  )}
-                </div>
-              </div>
-            </motion.button>
-          </motion.li>
-        ))}
+        {filtered.length === 0 ? (
+          <div className="py-12 text-center text-xs text-slate-500">
+            {archivedOpen ? 'No archived conversations' : 'No conversations found'}
+          </div>
+        ) : (
+          filtered.map((c) => {
+            const isLocked = lockedIds.includes(c.id);
+            return (
+              <motion.li key={c.id} variants={itemV}>
+                <motion.button 
+                  whileTap={{ scale: 0.97 }} 
+                  onClick={() => onOpen(c)}
+                  className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass cursor-pointer"
+                >
+                  <div className="relative">
+                    <Avatar chat={c} />
+                    {isLocked && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white shadow-md">
+                        <Lock className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-semibold">{c.name}</span>
+                      <span className={`text-xs ${c.unread ? "text-primary font-medium" : "text-muted-foreground"}`}>{c.time}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      {c.typing ? <Typing /> : <span className="truncate text-sm text-muted-foreground">{c.last || "No messages yet"}</span>}
+                      {c.unread > 0 && (
+                        <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...spring, delay: 0.2 }}
+                          className="bg-brand grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-bold text-primary-foreground shadow-glow">
+                          {c.unread > 99 ? '99+' : c.unread}
+                        </motion.span>
+                      )}
+                    </div>
+                  </div>
+                </motion.button>
+              </motion.li>
+            );
+          })
+        )}
       </motion.ul>
     </>
   );
@@ -366,7 +493,15 @@ function Toggle({ initial = true }: { initial?: boolean }) {
   );
 }
 
-function SettingsTab({ onOpenAuth, onOpenNotifications }: { onOpenAuth: () => void; onOpenNotifications?: () => void }) {
+function SettingsTab({ 
+  onOpenAuth, 
+  onOpenNotifications,
+  onOpenProfile
+}: { 
+  onOpenAuth: () => void; 
+  onOpenNotifications?: () => void;
+  onOpenProfile?: () => void;
+}) {
   const { user, signOut } = useAuth();
   const hue = user?.username ? (user.username.charCodeAt(0) * 37) % 360 : 190;
   
@@ -374,6 +509,7 @@ function SettingsTab({ onOpenAuth, onOpenNotifications }: { onOpenAuth: () => vo
     id: user?.id || "me", 
     name: user?.display_name || "Guest User", 
     handle: user?.username ? `@${user.username}` : "@guest", 
+    avatar_url: user?.avatar_url,
     hue, 
     last: "", 
     time: "", 
@@ -382,7 +518,7 @@ function SettingsTab({ onOpenAuth, onOpenNotifications }: { onOpenAuth: () => vo
   };
 
   const rows = [
-    { icon: User, label: "Account", hue: 210, action: onOpenAuth }, 
+    { icon: User, label: "Profile & Avatar", hue: 210, action: onOpenProfile || onOpenAuth }, 
     { 
       icon: Bell, 
       label: "AI Voice Assistant & Sounds", 
@@ -396,17 +532,27 @@ function SettingsTab({ onOpenAuth, onOpenNotifications }: { onOpenAuth: () => vo
   return (
     <>
       <Header title="Settings" />
-      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={spring} className="glass mx-5 flex items-center justify-between gap-4 rounded-3xl p-4">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.96 }} 
+        animate={{ opacity: 1, scale: 1 }} 
+        transition={spring} 
+        onClick={onOpenProfile}
+        className="glass mx-5 flex items-center justify-between gap-4 rounded-3xl p-4 cursor-pointer hover:bg-white/10 transition-colors"
+      >
         <div className="flex items-center gap-3.5">
           <Avatar chat={me} size={64} />
           <div>
             <div className="text-lg font-bold">{me.name}</div>
             <div className="text-sm text-muted-foreground">{me.handle} · ID {me.id.slice(0, 8)}</div>
+            <div className="text-[11px] text-teal-400 font-semibold mt-0.5">Tap to view & edit profile photo</div>
           </div>
         </div>
         {user ? (
           <button 
-            onClick={() => signOut()} 
+            onClick={(e) => {
+              e.stopPropagation();
+              signOut();
+            }} 
             className="p-2.5 rounded-2xl glass text-red-400 hover:bg-red-500/20 transition cursor-pointer"
             title="Log Out"
           >
@@ -414,7 +560,10 @@ function SettingsTab({ onOpenAuth, onOpenNotifications }: { onOpenAuth: () => vo
           </button>
         ) : (
           <button 
-            onClick={onOpenAuth}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenAuth();
+            }}
             className="px-3.5 py-1.5 rounded-xl bg-brand text-primary-foreground font-semibold text-xs shadow-glow cursor-pointer"
           >
             Log In
@@ -487,6 +636,7 @@ function ChatView({
   const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
   const [pinnedMessage, setPinnedMessage] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const [groupDrawerOpen, setGroupDrawerOpen] = useState(false);
+  const [contactInfoDrawerOpen, setContactInfoDrawerOpen] = useState(false);
   const [chatNotifModalOpen, setChatNotifModalOpen] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1469,8 +1619,6 @@ function ChatView({
     setMsgs((m) => [...m, newEntry]);
     SoundEffectsService.playMessageSent();
     HapticsService.medium();
-    SoundEffectsService.playMessageSent();
-    HapticsService.medium();
 
     // 2. Broadcast to other peer (Send to both specific room AND global listener)
     if (channelRef.current) {
@@ -1626,19 +1774,30 @@ function ChatView({
         >
           <ChevronLeft className="h-7 w-7" />
         </button>
-        <Avatar chat={chat} size={40} />
+        <Avatar 
+          chat={chat} 
+          size={40} 
+          onClick={() => {
+            HapticsService.light();
+            if (chat.type === 'group') setGroupDrawerOpen(true);
+            else setContactInfoDrawerOpen(true);
+          }}
+        />
         <div 
           onClick={() => {
+            HapticsService.light();
             if (chat.type === 'group') {
               setGroupDrawerOpen(true);
+            } else {
+              setContactInfoDrawerOpen(true);
             }
           }}
-          className={`flex-1 min-w-0 ${chat.type === 'group' ? 'cursor-pointer hover:opacity-80 transition' : ''}`}
+          className="flex-1 min-w-0 cursor-pointer hover:opacity-85 transition"
         >
           <div className="font-semibold leading-tight truncate">{chat.name}</div>
           <div className="text-xs text-accent flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
-            <span>{isPeerTyping ? "typing..." : (chat.type === 'group' ? 'Tap here for group info' : (chat.online ? "online" : chat.handle))}</span>
+            <span>{isPeerTyping ? "typing..." : (chat.type === 'group' ? 'Tap for group info' : (chat.online ? "online" : 'Tap for contact info & media'))}</span>
           </div>
         </div>
         <IconBtn label="Search in chat" onClick={() => {
@@ -1648,8 +1807,11 @@ function ChatView({
         }}>
           <Search className="h-4 w-4" />
         </IconBtn>
-        <IconBtn label="Notification alerts" onClick={() => setChatNotifModalOpen(true)}>
-          <Bell className="h-4 w-4" />
+        <IconBtn label="Contact & media info" onClick={() => {
+          if (chat.type === 'group') setGroupDrawerOpen(true);
+          else setContactInfoDrawerOpen(true);
+        }}>
+          <ImageIcon className="h-4 w-4" />
         </IconBtn>
         <IconBtn label="Voice call" onClick={() => onStartCall("audio", chat)}><Phone className="h-4 w-4" /></IconBtn>
         <IconBtn label="Video call" onClick={() => onStartCall("video", chat)}><Video className="h-4 w-4" /></IconBtn>
@@ -2155,6 +2317,34 @@ function ChatView({
         chat={chat}
       />
 
+      {/* WhatsApp-Style Contact Info & Media Drawer */}
+      <ChatContactInfoDrawer
+        isOpen={contactInfoDrawerOpen}
+        chat={chat}
+        messages={msgs}
+        onClose={() => setContactInfoDrawerOpen(false)}
+        onOpenNotifications={() => {
+          setContactInfoDrawerOpen(false);
+          setChatNotifModalOpen(true);
+        }}
+        onOpenMedia={(mediaItem) => {
+          if (mediaItem.type === 'image') {
+            setLightboxImage({
+              url: mediaItem.url,
+              sender: chat.name,
+              time: mediaItem.time || 'Shared Media'
+            });
+          } else {
+            window.open(mediaItem.url, '_blank');
+          }
+        }}
+        onClearChat={() => {
+          setMsgs([]);
+          setContactInfoDrawerOpen(false);
+          HapticsService.medium();
+        }}
+      />
+
       {/* Group Info / Members Drawer */}
       {chat.type === 'group' && (
         <GroupInfoDrawer
@@ -2185,6 +2375,7 @@ export function YoApp() {
   }, [open]);
 
   const [authOpen, setAuthOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [createStoryModalOpen, setCreateStoryModalOpen] = useState(false);
@@ -2621,6 +2812,7 @@ export function YoApp() {
                   }} 
                   onNewChat={() => setTab("people")} 
                   onNewGroup={() => setGroupModalOpen(true)}
+                  onOpenProfile={() => setProfileModalOpen(true)}
                 />
               )}
               {tab === "updates" && (
@@ -2655,6 +2847,7 @@ export function YoApp() {
                 <SettingsTab 
                   onOpenAuth={() => setAuthOpen(true)} 
                   onOpenNotifications={() => setGlobalNotifModalOpen(true)} 
+                  onOpenProfile={() => setProfileModalOpen(true)}
                 />
               )}
             </motion.div>
@@ -2771,6 +2964,23 @@ export function YoApp() {
 
       {/* Auth Modal for Supabase user signup & signin */}
       <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* User Profile Viewer & Avatar Editor */}
+      <ProfileViewerModal
+        isOpen={profileModalOpen}
+        user={user}
+        onClose={() => setProfileModalOpen(false)}
+        onUpdateAvatar={async (url) => {
+          if (user) {
+            await supabase
+              .from('profiles')
+              .update({ avatar_url: url, updated_at: new Date().toISOString() })
+              .eq('id', user.id);
+            user.avatar_url = url;
+            refreshConversations();
+          }
+        }}
+      />
 
       {/* Global AI Voice Assistant & Notification Settings Modal */}
       <NotificationSettingsModal

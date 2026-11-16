@@ -1,4 +1,17 @@
-export type Chat = { id: string; name: string; handle: string; hue: number; last: string; time: string; unread: number; online: boolean; typing?: boolean };
+export type Chat = { 
+  id: string; 
+  name: string; 
+  handle: string; 
+  hue: number; 
+  last: string; 
+  time: string; 
+  unread: number; 
+  online: boolean; 
+  typing?: boolean;
+  avatar_url?: string;
+  target_user_id?: string;
+  type?: 'direct' | 'group';
+};
 export const chats: Chat[] = [
   { id: "1", name: "Aarav Mehta", handle: "@aarav", hue: 200, last: "Yo!!! are we still on for tonight?", time: "22:14", unread: 3, online: true, typing: true },
   { id: "2", name: "Design Squad", handle: "group · 8", hue: 150, last: "Priya: shipped the new icons 🔥", time: "21:52", unread: 12, online: false },
