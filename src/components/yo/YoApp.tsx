@@ -53,11 +53,12 @@ import { AuthModal } from "../modals/AuthModal";
 import { CreateGroupModal } from "../modals/CreateGroupModal";
 import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
 import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
-import { StoriesTray } from "../stories/StoriesTray";
-import { StatusTab } from "../stories/StatusTab";
-import { CreateStoryModal } from "../stories/CreateStoryModal";
-import { StoryViewerModal } from "../stories/StoryViewerModal";
-import { StoryService, type UserStoryGroup } from "../../services/stories/StoryService";
+import { UpdatesHomeScreen } from "../../features/status/components/UpdatesHomeScreen";
+import { AddStatusModal } from "../../features/status/components/AddStatusModal";
+import { StatusViewerModal } from "../../features/status/components/StatusViewerModal";
+import { StatusPrivacyModal } from "../../features/status/components/StatusPrivacyModal";
+import { StatusService } from "../../features/status/services/StatusService";
+import type { UserStatusGroup, StatusContentType } from "../../features/status/types/status";
 import { NotificationService } from "../../services/notifications/NotificationService";
 import { VoiceAssistantService } from "../../services/voice/VoiceAssistantService";
 import { useAuth } from "../../contexts/AuthContext";
@@ -79,10 +80,10 @@ export type Chat = {
 };
 
 const spring = { type: "spring", stiffness: 500, damping: 38, mass: 0.8 } as const;
-type Tab = "chats" | "status" | "calls" | "people" | "settings";
+type Tab = "chats" | "updates" | "calls" | "people" | "settings";
 const tabs: { id: Tab; label: string; icon: typeof MessageCircle }[] = [
   { id: "chats", label: "Chats", icon: MessageCircle },
-  { id: "status", label: "Status", icon: CircleDashed },
+  { id: "updates", label: "Updates", icon: CircleDashed },
   { id: "calls", label: "Calls", icon: Phone },
   { id: "people", label: "People", icon: Users },
   { id: "settings", label: "Settings", icon: Settings },
@@ -167,20 +168,12 @@ function ChatsTab({
   chatsList, 
   onOpen, 
   onNewChat,
-  onNewGroup,
-  storyGroups,
-  currentUserId,
-  onOpenStory,
-  onAddStory
+  onNewGroup
 }: { 
   chatsList: Chat[]; 
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
-  storyGroups: UserStoryGroup[];
-  currentUserId?: string;
-  onOpenStory: (groupIndex: number) => void;
-  onAddStory: () => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = chatsList.filter(c => c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase()));
@@ -199,14 +192,6 @@ function ChatsTab({
             </IconBtn>
           </div>
         } 
-      />
-
-      {/* 24-Hour Stories / Status Updates Tray */}
-      <StoriesTray
-        groups={storyGroups}
-        currentUserId={currentUserId}
-        onOpenStory={onOpenStory}
-        onAddStory={onAddStory}
       />
 
       <SearchBar value={search} onChange={setSearch} />
@@ -2180,10 +2165,11 @@ export function YoApp() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [createStoryModalOpen, setCreateStoryModalOpen] = useState(false);
-  const [createStoryInitialMode, setCreateStoryInitialMode] = useState<'text' | 'image'>('text');
+  const [createStoryInitialMode, setCreateStoryInitialMode] = useState<StatusContentType>('text');
   const [viewerStoryModalOpen, setViewerStoryModalOpen] = useState(false);
+  const [privacyModalOpen, setPrivacyModalOpen] = useState(false);
   const [selectedStoryGroupIndex, setSelectedStoryGroupIndex] = useState(0);
-  const [storyGroups, setStoryGroups] = useState<UserStoryGroup[]>([]);
+  const [statusGroups, setStatusGroups] = useState<UserStatusGroup[]>([]);
   const [chatsList, setChatsList] = useState<Chat[]>([]);
   const chatsListRef = useRef<Chat[]>([]);
   useEffect(() => {
@@ -2331,18 +2317,18 @@ export function YoApp() {
     }
   };
 
-  const refreshStories = async () => {
+  const refreshStatuses = async () => {
     try {
-      const groups = await StoryService.getActiveStories(user?.id);
-      setStoryGroups(groups);
+      const res = await StatusService.getActiveStatusGroups(user?.id);
+      setStatusGroups(res.allGroups);
     } catch (err) {
-      console.warn("Failed to load stories:", err);
+      console.warn("Failed to load statuses:", err);
     }
   };
 
   useEffect(() => {
     refreshConversations();
-    refreshStories();
+    refreshStatuses();
 
     // Global listener for new messages & typing when user is on the chat list
     const globalChannel = supabase
@@ -2595,19 +2581,6 @@ export function YoApp() {
               {tab === "chats" && (
                 <ChatsTab 
                   chatsList={chatsList} 
-                  storyGroups={storyGroups}
-                  currentUserId={user?.id}
-                  onOpenStory={(groupIndex) => {
-                    setSelectedStoryGroupIndex(groupIndex);
-                    setViewerStoryModalOpen(true);
-                  }}
-                  onAddStory={() => {
-                    if (!user) {
-                      setAuthOpen(true);
-                      return;
-                    }
-                    setCreateStoryModalOpen(true);
-                  }}
                   onOpen={(c) => {
                     openRef.current = c;
                     setLocalLastRead(user?.id, c.id);
@@ -2627,15 +2600,14 @@ export function YoApp() {
                   onNewGroup={() => setGroupModalOpen(true)}
                 />
               )}
-              {tab === "status" && (
-                <StatusTab
-                  storyGroups={storyGroups}
+              {tab === "updates" && (
+                <UpdatesHomeScreen
                   currentUserId={user?.id}
-                  onOpenStory={(groupIndex) => {
+                  onOpenStatusViewer={(groupIndex) => {
                     setSelectedStoryGroupIndex(groupIndex);
                     setViewerStoryModalOpen(true);
                   }}
-                  onAddStoryText={() => {
+                  onAddStatusText={() => {
                     if (!user) {
                       setAuthOpen(true);
                       return;
@@ -2643,7 +2615,7 @@ export function YoApp() {
                     setCreateStoryInitialMode('text');
                     setCreateStoryModalOpen(true);
                   }}
-                  onAddStoryMedia={() => {
+                  onAddStatusMedia={() => {
                     if (!user) {
                       setAuthOpen(true);
                       return;
@@ -2651,6 +2623,7 @@ export function YoApp() {
                     setCreateStoryInitialMode('image');
                     setCreateStoryModalOpen(true);
                   }}
+                  onOpenPrivacySettings={() => setPrivacyModalOpen(true)}
                 />
               )}
               {tab === "calls" && <CallsTab onStartCall={startCall} />}
@@ -2721,9 +2694,9 @@ export function YoApp() {
         />
       )}
 
-      {/* Create New Story Modal */}
+      {/* Add / Create Status Modal (WhatsApp Toolbar: Text, Photo, Video, Voice) */}
       {user && (
-        <CreateStoryModal
+        <AddStatusModal
           isOpen={createStoryModalOpen}
           initialMode={createStoryInitialMode}
           onClose={() => setCreateStoryModalOpen(false)}
@@ -2733,27 +2706,35 @@ export function YoApp() {
             username: user.username || 'me',
             avatar_url: ''
           }}
-          onStoryCreated={() => refreshStories()}
+          onStatusCreated={() => refreshStatuses()}
         />
       )}
 
-      {/* Story Viewer Modal */}
-      {viewerStoryModalOpen && storyGroups.length > 0 && (
-        <StoryViewerModal
-          groups={storyGroups}
+      {/* Full-Screen Status Viewer with Likes & Replies */}
+      {viewerStoryModalOpen && statusGroups.length > 0 && (
+        <StatusViewerModal
+          groups={statusGroups}
           initialGroupIndex={selectedStoryGroupIndex}
           currentUserId={user?.id}
           onClose={() => {
             setViewerStoryModalOpen(false);
-            refreshStories();
+            refreshStatuses();
           }}
-          onReplyToStory={(storyAuthorId, _storySnippet, _replyText) => {
-            // Find chat with this author or start direct chat
+          onReplyToStatus={(storyAuthorId, _storySnippet, _replyText) => {
             const existing = chatsList.find((c) => c.target_user_id === storyAuthorId || c.id === storyAuthorId);
             if (existing) {
               setOpen(existing);
             }
           }}
+        />
+      )}
+
+      {/* Global Status Privacy Audience Settings */}
+      {user && (
+        <StatusPrivacyModal
+          isOpen={privacyModalOpen}
+          onClose={() => setPrivacyModalOpen(false)}
+          userId={user.id}
         />
       )}
 
