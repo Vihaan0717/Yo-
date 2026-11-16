@@ -8,27 +8,38 @@ import {
   Lock, 
   Mail, 
   User, 
-  AtSign, 
   Globe2,
-  CheckCircle2
+  CheckCircle2,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { UsernameInput } from '../auth/UsernameInput';
 
 const spring = { type: 'spring', stiffness: 450, damping: 35 } as const;
 
 export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplete }) => {
-  const { signIn, signUp } = useAuth();
+  const { 
+    signIn, 
+    signUp, 
+    signInWithGoogle, 
+    resendVerificationEmail, 
+    isEmailUnconfirmed, 
+    unconfirmedEmail 
+  } = useAuth();
+
   const [slide, setSlide] = useState<0 | 1 | 2>(0);
-  const [mode, setMode] = useState<'welcome' | 'login' | 'register'>('welcome');
+  const [mode, setMode] = useState<'welcome' | 'login' | 'register' | 'verify'>('welcome');
 
   // Form state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [isUsernameValid, setIsUsernameValid] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
 
   const introSlides = [
     {
@@ -71,13 +82,18 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
           setLoading(false);
           return;
         }
+
+        if (!isUsernameValid) {
+          setError('Please choose a valid and available username');
+          setLoading(false);
+          return;
+        }
+
         const res = await signUp(email, password, username, displayName);
         if (res.error) {
           setError(res.error);
         } else if (res.requiresEmailConfirmation) {
-          setSuccessNotice(
-            `Account created! Please check your inbox at ${email} to confirm your email, or disable 'Confirm email' in Supabase Auth settings to log in immediately.`
-          );
+          setMode('verify');
         } else {
           onComplete();
         }
@@ -89,6 +105,19 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
     }
   };
 
+  const handleResend = async () => {
+    setResendStatus('Sending confirmation email...');
+    const res = await resendVerificationEmail();
+    if (res.error) {
+      setResendStatus(`Failed: ${res.error}`);
+    } else {
+      setResendStatus('New confirmation link sent! Check your inbox.');
+    }
+  };
+
+  // If user state detects unconfirmed email
+  const showVerificationScreen = mode === 'verify' || isEmailUnconfirmed;
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[#0d131f] flex flex-col justify-between p-6 max-w-md mx-auto border-x border-white/5">
       {/* Dynamic ambient background orbs */}
@@ -97,7 +126,56 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
         <div className="animate-blob absolute right-[-60px] top-1/4 h-96 w-96 rounded-full bg-[#2dd4bf]/20 blur-[100px]" style={{ animationDelay: "-5s" }} />
       </div>
 
-      {mode === 'welcome' ? (
+      {showVerificationScreen ? (
+        /* Email Verification Pending Screen */
+        <div className="flex-1 flex flex-col justify-between py-8 z-10">
+          <div className="space-y-6">
+            <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-glow">
+              <Mail className="w-8 h-8" />
+            </div>
+
+            <div>
+              <span className="text-[11px] font-bold tracking-widest uppercase text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+                ACTION REQUIRED
+              </span>
+              <h2 className="text-3xl font-black text-white tracking-tight mt-3">
+                Verify your email
+              </h2>
+              <p className="text-sm text-slate-300 mt-2 leading-relaxed">
+                We sent a secure activation link to <br />
+                <span className="font-semibold text-white underline">{unconfirmedEmail || email}</span>.
+              </p>
+              <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+                Click the confirmation link in the email to activate your account and securely lock your unique @handle.
+              </p>
+            </div>
+
+            {resendStatus && (
+              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-xs text-emerald-300">
+                {resendStatus}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 pb-4">
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleResend}
+              className="w-full bg-white/10 hover:bg-white/15 py-3.5 rounded-2xl font-semibold text-white border border-white/20 flex items-center justify-center gap-2 cursor-pointer transition text-sm"
+            >
+              <RefreshCw className="w-4 h-4 text-emerald-400" />
+              <span>Resend Verification Email</span>
+            </motion.button>
+
+            <button
+              onClick={() => { setMode('login'); setError(null); }}
+              className="w-full py-3 text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer"
+            >
+              Back to Sign In
+            </button>
+          </div>
+        </div>
+      ) : mode === 'welcome' ? (
         <>
           {/* Top Logo Badge */}
           <div className="flex items-center justify-between pt-4 z-10">
@@ -190,7 +268,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
         </>
       ) : (
         /* Login / Register Glass Form View */
-        <div className="flex-1 flex flex-col justify-between py-6 z-10">
+        <div className="flex-1 flex flex-col justify-between py-6 z-10 overflow-y-auto">
           <div>
             <button
               onClick={() => { setMode('welcome'); setError(null); setSuccessNotice(null); }}
@@ -238,18 +316,14 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">Unique Handle (@username)</label>
-                    <div className="relative">
-                      <AtSign className="absolute left-4 top-3.5 w-4 h-4 text-muted-foreground" />
-                      <input
-                        type="text"
-                        required
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                        placeholder="alex"
-                        className="glass w-full pl-11 pr-4 py-3 rounded-2xl text-sm outline-none text-white placeholder:text-muted-foreground"
-                      />
-                    </div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Unique Handle (@username)
+                    </label>
+                    <UsernameInput
+                      value={username}
+                      onChange={setUsername}
+                      onValidityChange={setIsUsernameValid}
+                    />
                   </div>
                 </>
               )}
@@ -287,7 +361,7 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
               <motion.button
                 whileTap={{ scale: 0.95 }}
                 type="submit"
-                disabled={loading}
+                disabled={loading || (mode === 'register' && !isUsernameValid)}
                 className="w-full bg-brand py-4 rounded-3xl font-bold text-primary-foreground shadow-glow flex items-center justify-center gap-2 mt-6 cursor-pointer disabled:opacity-50"
               >
                 {loading ? (
@@ -305,9 +379,45 @@ export const OnboardingView: React.FC<{ onComplete: () => void }> = ({ onComplet
                 )}
               </motion.button>
             </form>
+
+            {/* Google OAuth Option */}
+            <div className="relative my-5 text-center">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10" />
+              </div>
+              <span className="relative bg-[#0d131f] px-3 text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
+                Or continue with
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={signInWithGoogle}
+              className="w-full glass py-3 rounded-2xl text-xs font-semibold text-white flex items-center justify-center gap-2.5 hover:bg-white/10 transition cursor-pointer border border-white/10"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path
+                  fill="#EA4335"
+                  d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.2-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
+                />
+              </svg>
+              <span>Continue with Google</span>
+            </button>
           </div>
 
-          <div className="text-center pt-4">
+          <div className="text-center pt-6 pb-2">
             <button
               onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(null); setSuccessNotice(null); }}
               className="text-xs text-muted-foreground hover:text-white cursor-pointer"
