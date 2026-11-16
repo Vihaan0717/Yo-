@@ -30,7 +30,8 @@ import {
   PinOff,
   FileText,
   Film,
-  Image as ImageIcon
+  Image as ImageIcon,
+  CircleDashed
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -53,6 +54,7 @@ import { CreateGroupModal } from "../modals/CreateGroupModal";
 import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
 import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
 import { StoriesTray } from "../stories/StoriesTray";
+import { StatusTab } from "../stories/StatusTab";
 import { CreateStoryModal } from "../stories/CreateStoryModal";
 import { StoryViewerModal } from "../stories/StoryViewerModal";
 import { StoryService, type UserStoryGroup } from "../../services/stories/StoryService";
@@ -77,9 +79,10 @@ export type Chat = {
 };
 
 const spring = { type: "spring", stiffness: 500, damping: 38, mass: 0.8 } as const;
-type Tab = "chats" | "calls" | "people" | "settings";
+type Tab = "chats" | "status" | "calls" | "people" | "settings";
 const tabs: { id: Tab; label: string; icon: typeof MessageCircle }[] = [
   { id: "chats", label: "Chats", icon: MessageCircle },
+  { id: "status", label: "Status", icon: CircleDashed },
   { id: "calls", label: "Calls", icon: Phone },
   { id: "people", label: "People", icon: Users },
   { id: "settings", label: "Settings", icon: Settings },
@@ -2177,6 +2180,7 @@ export function YoApp() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [createStoryModalOpen, setCreateStoryModalOpen] = useState(false);
+  const [createStoryInitialMode, setCreateStoryInitialMode] = useState<'text' | 'image'>('text');
   const [viewerStoryModalOpen, setViewerStoryModalOpen] = useState(false);
   const [selectedStoryGroupIndex, setSelectedStoryGroupIndex] = useState(0);
   const [storyGroups, setStoryGroups] = useState<UserStoryGroup[]>([]);
@@ -2623,6 +2627,32 @@ export function YoApp() {
                   onNewGroup={() => setGroupModalOpen(true)}
                 />
               )}
+              {tab === "status" && (
+                <StatusTab
+                  storyGroups={storyGroups}
+                  currentUserId={user?.id}
+                  onOpenStory={(groupIndex) => {
+                    setSelectedStoryGroupIndex(groupIndex);
+                    setViewerStoryModalOpen(true);
+                  }}
+                  onAddStoryText={() => {
+                    if (!user) {
+                      setAuthOpen(true);
+                      return;
+                    }
+                    setCreateStoryInitialMode('text');
+                    setCreateStoryModalOpen(true);
+                  }}
+                  onAddStoryMedia={() => {
+                    if (!user) {
+                      setAuthOpen(true);
+                      return;
+                    }
+                    setCreateStoryInitialMode('image');
+                    setCreateStoryModalOpen(true);
+                  }}
+                />
+              )}
               {tab === "calls" && <CallsTab onStartCall={startCall} />}
               {tab === "people" && <PeopleTab onStartDirectChat={startDirectChat} />}
               {tab === "settings" && (
@@ -2695,6 +2725,7 @@ export function YoApp() {
       {user && (
         <CreateStoryModal
           isOpen={createStoryModalOpen}
+          initialMode={createStoryInitialMode}
           onClose={() => setCreateStoryModalOpen(false)}
           userId={user.id}
           userProfile={{

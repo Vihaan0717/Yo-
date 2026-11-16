@@ -8,6 +8,7 @@ interface CreateStoryModalProps {
   isOpen: boolean;
   onClose: () => void;
   userId: string;
+  initialMode?: StoryMediaType;
   userProfile?: { display_name: string; username: string; avatar_url?: string };
   onStoryCreated: () => void;
 }
@@ -24,10 +25,20 @@ export const CreateStoryModal: React.FC<CreateStoryModalProps> = ({
   isOpen,
   onClose,
   userId,
+  initialMode = 'text',
   userProfile,
   onStoryCreated
 }) => {
-  const [mode, setMode] = useState<StoryMediaType>('text');
+  const [mode, setMode] = useState<StoryMediaType>(initialMode);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+      if (initialMode === 'image') {
+        setTimeout(() => photoInputRef.current?.click(), 100);
+      }
+    }
+  }, [isOpen, initialMode]);
   const [textContent, setTextContent] = useState('');
   const [gradientIndex, setGradientIndex] = useState(0);
   const [mediaDataUrl, setMediaDataUrl] = useState<string | null>(null);
