@@ -73,16 +73,27 @@ export class IdentityService {
     }
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+
       const { data, error } = await supabase.rpc('check_username_availability', {
         p_username: username.trim()
-      });
+      }).abortSignal(controller.signal);
+
+      clearTimeout(timeoutId);
 
       if (error) {
         // Fallback to table query if RPC not applied yet
+        const subController = new AbortController();
+        const subTimeout = setTimeout(() => subController.abort(), 2000);
+
         const { count } = await supabase
           .from('profiles')
           .select('id', { count: 'exact', head: true })
-          .ilike('username', username.trim());
+          .ilike('username', username.trim())
+          .abortSignal(subController.signal);
+
+        clearTimeout(subTimeout);
 
         return {
           available: count === 0,
