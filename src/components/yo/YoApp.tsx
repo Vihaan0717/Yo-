@@ -32,7 +32,10 @@ import {
   Film,
   Image as ImageIcon,
   CircleDashed,
-  Archive
+  Archive,
+  Wand2,
+  Loader2,
+  Check
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
@@ -174,60 +177,104 @@ function Typing() {
   );
 }
 
+type CustomList = { id: string; name: string; ids: string[] };
+
 function ChatsTab({ 
   chatsList, 
+  archivedIds,
+  lockedIds,
+  favoritesIds,
   onOpen, 
   onNewChat,
   onNewGroup,
   onOpenProfile
 }: { 
   chatsList: Chat[]; 
+  archivedIds: string[];
+  lockedIds: string[];
+  favoritesIds: string[];
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
   onOpenProfile?: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<'all' | 'unread' | 'favorites' | 'groups'>('all');
+  const [activeFilter, setActiveFilter] = useState<string>("all");
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [pickedChatIds, setPickedChatIds] = useState<string[]>([]);
 
-  // Local storage for archived and locked chats
-  const [archivedIds] = useState<string[]>(() => {
+  // Persistent Custom Lists ("Family", "Friends", etc.)
+  const [customLists, setCustomLists] = useState<CustomList[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('yo_archived_chats') || '[]');
+      const stored = localStorage.getItem('yo_custom_lists');
+      if (stored) return JSON.parse(stored);
     } catch {
-      return [];
+      // fallback
     }
+    return [
+      { id: "family", name: "Family", ids: [] },
+      { id: "friends", name: "Friends", ids: [] }
+    ];
   });
 
-  const [lockedIds] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('yo_locked_chats') || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const saveNewList = () => {
+    if (!newListName.trim()) return;
+    const trimmed = newListName.trim().slice(0, 20);
+    const existingIndex = customLists.findIndex(l => l.name.toLowerCase() === trimmed.toLowerCase());
+    let next: CustomList[];
+    let targetId: string;
 
-  const filterChips: Array<{ id: 'all' | 'unread' | 'favorites' | 'groups'; label: string }> = [
-    { id: 'all', label: 'All' },
-    { id: 'unread', label: 'Unread' },
-    { id: 'favorites', label: 'Favorites' },
-    { id: 'groups', label: 'Groups' },
+    if (existingIndex >= 0) {
+      next = [...customLists];
+      next[existingIndex] = { ...next[existingIndex], ids: pickedChatIds };
+      targetId = next[existingIndex].id;
+    } else {
+      targetId = `list_${Date.now()}`;
+      next = [...customLists, { id: targetId, name: trimmed, ids: pickedChatIds }];
+    }
+
+    setCustomLists(next);
+    try {
+      localStorage.setItem('yo_custom_lists', JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+    setActiveFilter(targetId);
+    setCreating(false);
+    setNewListName("");
+    setPickedChatIds([]);
+    HapticsService.medium();
+    SoundEffectsService.playTap();
+  };
+
+  const standardChips = [
+    { id: "all", name: "All" },
+    { id: "unread", name: "Unread" },
+    { id: "favorites", name: "Favorites" },
+    { id: "groups", name: "Groups" }
   ];
+
+  const chips = [...standardChips, ...customLists];
 
   // Base list separated by archive
   const activeChats = chatsList.filter((c) => !archivedIds.includes(c.id));
   const archivedChats = chatsList.filter((c) => archivedIds.includes(c.id));
 
   const listToFilter = archivedOpen ? archivedChats : activeChats;
+  const currentCustom = customLists.find((l) => l.id === activeFilter);
 
   const filtered = listToFilter.filter(c => {
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || c.handle.toLowerCase().includes(search.toLowerCase());
     if (!matchesSearch) return false;
 
+    if (currentCustom) {
+      return currentCustom.ids.includes(c.id);
+    }
     if (activeFilter === 'unread') return c.unread > 0;
     if (activeFilter === 'groups') return c.type === 'group';
-    if (activeFilter === 'favorites') return c.online || c.unread > 0;
+    if (activeFilter === 'favorites') return favoritesIds.includes(c.id) || c.unread > 0;
     return true;
   });
 
@@ -239,17 +286,23 @@ function ChatsTab({
           <div className="flex items-center gap-1.5">
             {archivedOpen ? (
               <button
-                onClick={() => setArchivedOpen(false)}
-                className="px-3 py-1.5 rounded-full glass text-xs font-semibold text-slate-300 hover:text-white cursor-pointer"
+                onClick={() => {
+                  HapticsService.light();
+                  setArchivedOpen(false);
+                }}
+                className="px-3.5 py-1.5 rounded-full glass text-xs font-semibold text-foreground hover:bg-white/10 cursor-pointer transition-colors"
               >
                 Back
               </button>
             ) : (
               <>
                 <button
-                  onClick={onOpenProfile}
-                  className="px-2.5 py-1 rounded-full glass hover:bg-white/10 text-xs font-medium text-teal-300 border border-teal-500/30 flex items-center gap-1 cursor-pointer"
-                  title="My Profile"
+                  onClick={() => {
+                    HapticsService.light();
+                    onOpenProfile?.();
+                  }}
+                  className="px-3 py-1.5 rounded-full glass hover:bg-white/10 text-xs font-semibold text-primary border border-primary/30 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="My Profile Photo & Info"
                 >
                   <User className="w-3.5 h-3.5" />
                   <span>Profile</span>
@@ -268,30 +321,107 @@ function ChatsTab({
 
       <SearchBar value={search} onChange={setSearch} />
 
-      {/* WhatsApp Filter Chips (All, Unread, Favorites, Groups) */}
+      {/* WhatsApp & Glasswave Filter Chips (All, Unread, Favorites, Groups, Family, Friends, + Custom) */}
       {!archivedOpen && (
-        <div className="flex items-center gap-1.5 px-5 pb-3 overflow-x-auto scrollbar-none">
-          {filterChips.map((chip) => {
-            const isActive = activeFilter === chip.id;
+        <div className="no-scrollbar flex gap-2 overflow-x-auto px-5 pb-3">
+          {chips.map((x) => {
+            const isActive = activeFilter === x.id;
             return (
-              <button
-                key={chip.id}
+              <motion.button 
+                key={x.id} 
+                whileTap={{ scale: 0.92 }} 
                 onClick={() => {
                   HapticsService.selection();
-                  setActiveFilter(chip.id);
+                  SoundEffectsService.playTap();
+                  setActiveFilter(x.id);
                 }}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
-                    : 'glass text-slate-400 hover:text-white border border-white/5'
+                className={`relative shrink-0 rounded-full px-4 py-1.5 text-xs font-semibold transition-colors cursor-pointer select-none ${
+                  isActive ? "text-primary-foreground" : "glass text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {chip.label}
-              </button>
+                {isActive && (
+                  <motion.span layoutId="chip" transition={spring} className="bg-brand absolute inset-0 rounded-full shadow-glow" />
+                )}
+                <span className="relative">{x.name}</span>
+              </motion.button>
             );
           })}
+          <motion.button 
+            whileTap={{ scale: 0.85, rotate: 90 }} 
+            onClick={() => {
+              HapticsService.light();
+              setCreating(true);
+            }} 
+            aria-label="Create custom list"
+            title="Create list (e.g. Family, Friends)"
+            className="glass grid h-7 w-7 shrink-0 place-items-center rounded-full text-primary cursor-pointer hover:bg-white/10"
+          >
+            <Plus className="h-4 w-4" />
+          </motion.button>
         </div>
       )}
+
+      {/* Inline Custom List Creator (Glasswave-Pattern) */}
+      <AnimatePresence>
+        {creating && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }} 
+            animate={{ opacity: 1, height: "auto" }} 
+            exit={{ opacity: 0, height: 0 }} 
+            transition={spring} 
+            className="overflow-hidden px-5 pb-3"
+          >
+            <div className="glass-strong rounded-3xl p-4 border border-border">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-bold text-foreground">New list (e.g. Family, Friends)</span>
+                <button 
+                  aria-label="Cancel" 
+                  onClick={() => setCreating(false)} 
+                  className="text-muted-foreground hover:text-foreground cursor-pointer p-1"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <input 
+                autoFocus 
+                value={newListName} 
+                onChange={(e) => setNewListName(e.target.value)} 
+                placeholder="List name, e.g. Family" 
+                maxLength={20}
+                className="mb-3 w-full rounded-2xl border border-input bg-card px-4 py-2.5 text-sm outline-none focus:border-primary text-foreground" 
+              />
+              <div className="text-xs font-medium text-muted-foreground mb-2">Select contacts to include:</div>
+              <div className="no-scrollbar flex flex-wrap gap-2 max-h-36 overflow-y-auto">
+                {chatsList.map((c) => {
+                  const on = pickedChatIds.includes(c.id);
+                  return (
+                    <button 
+                      key={c.id} 
+                      onClick={() => {
+                        HapticsService.light();
+                        setPickedChatIds((p) => on ? p.filter((x) => x !== c.id) : [...p, c.id]);
+                      }}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors ${
+                        on ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:bg-white/5"
+                      }`}
+                    >
+                      {on && <Check className="h-3 w-3" />}
+                      <span>{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button 
+                onClick={saveNewList} 
+                disabled={!newListName.trim()} 
+                className="bg-brand mt-4 w-full rounded-2xl py-2.5 text-sm font-bold text-primary-foreground shadow-glow disabled:opacity-50 cursor-pointer"
+              >
+                Create List
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* WhatsApp-Style Archived Row Banner */}
       {!archivedOpen && archivedChats.length > 0 && (
@@ -301,23 +431,43 @@ function ChatsTab({
               HapticsService.light();
               setArchivedOpen(true);
             }}
-            className="w-full flex items-center justify-between p-3 rounded-2xl glass hover:bg-white/10 transition cursor-pointer text-left border border-white/10"
+            className="w-full flex items-center justify-between p-3 rounded-2xl glass hover:bg-white/10 transition cursor-pointer text-left border border-border"
           >
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center">
                 <Archive className="w-4 h-4" />
               </div>
-              <span className="text-xs font-bold text-white">Archived Chats</span>
+              <span className="text-xs font-bold text-foreground">Archived Chats</span>
             </div>
-            <span className="text-xs text-slate-400 font-mono">{archivedChats.length}</span>
+            <span className="text-xs text-muted-foreground font-mono">{archivedChats.length}</span>
           </button>
         </div>
       )}
 
+      {/* Chat List Items */}
       <motion.ul variants={listV} initial="hidden" animate="show" className="space-y-1 px-3 pb-32">
         {filtered.length === 0 ? (
-          <div className="py-12 text-center text-xs text-slate-500">
-            {archivedOpen ? 'No archived conversations' : 'No conversations found'}
+          <div className="py-12 px-6 text-center">
+            <p className="text-xs text-muted-foreground mb-3">
+              {archivedOpen 
+                ? 'No archived conversations.' 
+                : (currentCustom 
+                  ? `No contacts in "${currentCustom.name}" yet.` 
+                  : 'No conversations found.')
+              }
+            </p>
+            {currentCustom && (
+              <button
+                onClick={() => {
+                  setNewListName(currentCustom.name);
+                  setPickedChatIds(currentCustom.ids);
+                  setCreating(true);
+                }}
+                className="px-4 py-2 rounded-2xl bg-brand text-xs font-bold text-primary-foreground shadow-glow cursor-pointer"
+              >
+                Manage contacts for {currentCustom.name}
+              </button>
+            )}
           </div>
         ) : (
           filtered.map((c) => {
@@ -593,11 +743,23 @@ function SettingsTab({
 function ChatView({ 
   chat, 
   onBack, 
-  onStartCall 
+  onStartCall,
+  isLocked = false,
+  isArchived = false,
+  isFavorite = false,
+  onToggleLock,
+  onToggleArchive,
+  onToggleFavorite
 }: { 
   chat: Chat; 
   onBack: () => void; 
   onStartCall: (type: "audio" | "video", chat: Chat) => void;
+  isLocked?: boolean;
+  isArchived?: boolean;
+  isFavorite?: boolean;
+  onToggleLock?: () => void;
+  onToggleArchive?: () => void;
+  onToggleFavorite?: () => void;
 }) {
   const { user } = useAuth();
   const [msgs, setMsgs] = useState<Array<{ 
@@ -648,6 +810,47 @@ function ChatView({
   const recorderRef = useRef<VoiceRecorderService | null>(null);
   const recordTimerRef = useRef<any>(null);
   const reactionOptions = ["❤️", "🔥", "😂", "👍", "😮", "🙏"];
+
+  // AI Tone Rewriter (Glasswave-Pattern)
+  const TONES = ["Friendly", "Professional", "Funny", "Romantic", "Short", "Polite"] as const;
+  type Tone = (typeof TONES)[number];
+  const [toneOpen, setToneOpen] = useState(false);
+  const [busyTone, setBusyTone] = useState<Tone | null>(null);
+
+  const rewriteDraftTone = (original: string, tone: Tone): string => {
+    const clean = original.trim();
+    if (!clean) return original;
+    switch (tone) {
+      case "Friendly":
+        return `Hey! Just wanted to share: ${clean} 😊✨`;
+      case "Professional":
+        return `Hello, I hope this finds you well. Regarding our conversation: ${clean}. Please let me know your thoughts.`;
+      case "Funny":
+        return `Yo! Not to make a whole scene, but: ${clean} 😂🚀`;
+      case "Romantic":
+        return `Hey sweetheart, just thinking of you... ${clean} ❤️`;
+      case "Short":
+        return clean.length > 30 ? clean.split(/[.,!?;]/)[0].trim() : clean;
+      case "Polite":
+        return `Hello, could you kindly note: ${clean}? Thank you so much! 🙏`;
+      default:
+        return clean;
+    }
+  };
+
+  const handleApplyTone = (tone: Tone) => {
+    if (!text.trim() || busyTone) return;
+    setBusyTone(tone);
+    HapticsService.medium();
+    setTimeout(() => {
+      const transformed = rewriteDraftTone(text, tone);
+      setText(transformed);
+      setBusyTone(null);
+      setToneOpen(false);
+      SoundEffectsService.playTap();
+      HapticsService.light();
+    }, 250);
+  };
 
   // Matching messages for In-Chat search
   const matchedMsgIds = searchQuery.trim()
@@ -2275,6 +2478,18 @@ function ChatView({
                 placeholder="Message" 
                 className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" 
               />
+              <motion.button 
+                whileTap={{ scale: 0.8, rotate: -20 }} 
+                onClick={() => {
+                  HapticsService.light();
+                  setToneOpen(!toneOpen);
+                }} 
+                aria-label="Rewrite with AI"
+                title="Rewrite message in a tone"
+                className={`ml-2 cursor-pointer p-0.5 transition-colors ${toneOpen ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <Wand2 className="h-4 w-4" />
+              </motion.button>
             </div>
           </>
         )}
@@ -2301,6 +2516,52 @@ function ChatView({
         </motion.button>
       </div>
 
+      {/* AI Tone Rewriter Drawer (Glasswave-Pattern) */}
+      <AnimatePresence>
+        {toneOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: 16, scale: 0.97 }} 
+            animate={{ opacity: 1, y: 0, scale: 1 }} 
+            exit={{ opacity: 0, y: 16, scale: 0.97 }} 
+            transition={spring}
+            className="glass-strong mx-3 mb-2 rounded-3xl p-3.5 border border-border"
+          >
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                <Wand2 className="h-4 w-4 text-primary" />
+                Rewrite message tone
+              </span>
+              <button 
+                aria-label="Close" 
+                onClick={() => setToneOpen(false)} 
+                className="text-muted-foreground hover:text-foreground cursor-pointer p-1"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {!text.trim() && (
+              <p className="px-1 pb-2 text-[11px] text-muted-foreground">
+                Type your draft message first, then tap a tone below to rewrite.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2 pt-1">
+              {TONES.map((t) => (
+                <motion.button 
+                  key={t} 
+                  whileTap={{ scale: 0.92 }} 
+                  disabled={!text.trim() || !!busyTone} 
+                  onClick={() => handleApplyTone(t)}
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-semibold text-foreground shadow-sm transition-colors hover:border-primary hover:text-primary disabled:opacity-50 cursor-pointer"
+                >
+                  {busyTone === t && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                  <span>{t}</span>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Full-Screen Glass Lightbox Viewer */}
       <LightboxModal
         isOpen={!!lightboxImage}
@@ -2322,7 +2583,19 @@ function ChatView({
         isOpen={contactInfoDrawerOpen}
         chat={chat}
         messages={msgs}
+        isLocked={isLocked}
+        isArchived={isArchived}
+        isFavorite={isFavorite}
         onClose={() => setContactInfoDrawerOpen(false)}
+        onToggleLock={onToggleLock}
+        onToggleArchive={onToggleArchive}
+        onToggleFavorite={onToggleFavorite}
+        onStartAudioCall={() => onStartCall("audio", chat)}
+        onStartVideoCall={() => onStartCall("video", chat)}
+        onSearchInChat={() => {
+          setIsSearching(true);
+          setContactInfoDrawerOpen(false);
+        }}
         onOpenNotifications={() => {
           setContactInfoDrawerOpen(false);
           setChatNotifModalOpen(true);
@@ -2389,6 +2662,41 @@ export function YoApp() {
   useEffect(() => {
     chatsListRef.current = chatsList;
   }, [chatsList]);
+
+  // Archived, Locked & Favorited Chats State & Persistence
+  const [archivedIds, setArchivedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('yo_archived_chats') || '[]'); } catch { return []; }
+  });
+  const [lockedIds, setLockedIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('yo_locked_chats') || '[]'); } catch { return []; }
+  });
+  const [favoritesIds, setFavoritesIds] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('yo_favorites') || '[]'); } catch { return []; }
+  });
+
+  const toggleArchive = (chatId: string) => {
+    setArchivedIds((prev) => {
+      const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
+      try { localStorage.setItem('yo_archived_chats', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const toggleLock = (chatId: string) => {
+    setLockedIds((prev) => {
+      const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
+      try { localStorage.setItem('yo_locked_chats', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const toggleFavorite = (chatId: string) => {
+    setFavoritesIds((prev) => {
+      const next = prev.includes(chatId) ? prev.filter((id) => id !== chatId) : [...prev, chatId];
+      try { localStorage.setItem('yo_favorites', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   // WebRTC Calling state
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
@@ -2795,6 +3103,9 @@ export function YoApp() {
               {tab === "chats" && (
                 <ChatsTab 
                   chatsList={chatsList} 
+                  archivedIds={archivedIds}
+                  lockedIds={lockedIds}
+                  favoritesIds={favoritesIds}
                   onOpen={(c) => {
                     openRef.current = c;
                     setLocalLastRead(user?.id, c.id);
@@ -2885,6 +3196,12 @@ export function YoApp() {
             <ChatView 
               key={open.id} 
               chat={open} 
+              isLocked={lockedIds.includes(open.id)}
+              isArchived={archivedIds.includes(open.id)}
+              isFavorite={favoritesIds.includes(open.id)}
+              onToggleLock={() => toggleLock(open.id)}
+              onToggleArchive={() => toggleArchive(open.id)}
+              onToggleFavorite={() => toggleFavorite(open.id)}
               onBack={() => {
                 if (open) {
                   setLocalLastRead(user?.id, open.id);
