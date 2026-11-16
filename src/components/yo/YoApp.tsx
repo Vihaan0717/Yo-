@@ -45,6 +45,7 @@ import { CallOverlay } from "../../features/calls/components/CallOverlay";
 import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
 import { AuthModal } from "../modals/AuthModal";
 import { CreateGroupModal } from "../modals/CreateGroupModal";
+import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
 import { NotificationService } from "../../services/notifications/NotificationService";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../services/supabase/client";
@@ -61,6 +62,7 @@ export type Chat = {
   online: boolean; 
   typing?: boolean;
   target_user_id?: string;
+  type?: 'direct' | 'group';
 };
 
 const spring = { type: "spring", stiffness: 500, damping: 38, mass: 0.8 } as const;
@@ -464,6 +466,7 @@ function ChatView({
   const [firstUnreadSequence, setFirstUnreadSequence] = useState<number | null>(null);
   const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
   const [pinnedMessage, setPinnedMessage] = useState<{ id: string; sender_name: string; content: string } | null>(null);
+  const [groupDrawerOpen, setGroupDrawerOpen] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchIndex, setSearchMatchIndex] = useState(0);
@@ -1308,11 +1311,18 @@ function ChatView({
           <ChevronLeft className="h-7 w-7" />
         </button>
         <Avatar chat={chat} size={40} />
-        <div className="flex-1">
-          <div className="font-semibold leading-tight">{chat.name}</div>
+        <div 
+          onClick={() => {
+            if (chat.type === 'group') {
+              setGroupDrawerOpen(true);
+            }
+          }}
+          className={`flex-1 min-w-0 ${chat.type === 'group' ? 'cursor-pointer hover:opacity-80 transition' : ''}`}
+        >
+          <div className="font-semibold leading-tight truncate">{chat.name}</div>
           <div className="text-xs text-accent flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
-            <span>{isPeerTyping ? "typing..." : (chat.online ? "online" : chat.handle)}</span>
+            <span>{isPeerTyping ? "typing..." : (chat.type === 'group' ? 'Tap here for group info' : (chat.online ? "online" : chat.handle))}</span>
           </div>
         </div>
         <IconBtn label="Search in chat" onClick={() => {
@@ -1730,6 +1740,22 @@ function ChatView({
         timestamp={lightboxImage?.time}
         onClose={() => setLightboxImage(null)}
       />
+
+      {/* Group Info / Members Drawer */}
+      {chat.type === 'group' && (
+        <GroupInfoDrawer
+          isOpen={groupDrawerOpen}
+          chat={chat}
+          onClose={() => setGroupDrawerOpen(false)}
+          onLeaveGroup={() => {
+            setGroupDrawerOpen(false);
+            onBack();
+          }}
+          onMemberCountUpdated={(count) => {
+            chat.handle = `${count} members`;
+          }}
+        />
+      )}
     </motion.div>
   );
 }
@@ -1844,7 +1870,8 @@ export function YoApp() {
             time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
             unread: unreadCount,
             online: true,
-            target_user_id: targetUserId
+            target_user_id: targetUserId,
+            type: conv.type
           });
         }
 
