@@ -27,11 +27,16 @@ import {
   ChevronDown,
   X,
   Pin,
-  PinOff
+  PinOff,
+  FileText,
+  Film,
+  Image as ImageIcon
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { VoiceNoteBubble } from "./VoiceNoteBubble";
 import { ImageBubble } from "./ImageBubble";
+import { VideoBubble } from "./VideoBubble";
+import { DocumentBubble } from "./DocumentBubble";
 import { LightboxModal } from "./LightboxModal";
 import { MessageStatusIndicator } from "../../features/messaging/components/MessageStatusIndicator";
 import { DateSeparator, formatDateLabel } from "../../features/messaging/components/DateSeparator";
@@ -446,6 +451,10 @@ function ChatView({
     message_type?: string;
     audio_url?: string;
     image_url?: string;
+    video_url?: string;
+    file_url?: string;
+    file_name?: string;
+    file_size?: number;
     reactions?: Record<string, string[]>;
     reply_quote?: { id: string; sender_name: string; content: string };
     status?: MessageStatus;
@@ -463,6 +472,9 @@ function ChatView({
   const [replyingTo, setReplyingTo] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; sender: string; time: string } | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
+  const docInputRef = useRef<HTMLInputElement | null>(null);
   const [firstUnreadSequence, setFirstUnreadSequence] = useState<number | null>(null);
   const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
   const [pinnedMessage, setPinnedMessage] = useState<{ id: string; sender_name: string; content: string } | null>(null);
@@ -569,11 +581,14 @@ function ChatView({
         let incomingUnreadCount = 0;
 
         const formatted = data.map((m: any, idx: number) => {
-          const isAudio = m.message_type === 'audio' || (typeof m.content === 'string' && m.content.startsWith('data:audio'));
-          const isImage = m.message_type === 'image' || (typeof m.content === 'string' && m.content.startsWith('data:image'));
           const isMe = m.sender_id === user?.id;
           const seq = m.sequence_number || (idx + 1);
           const isDeleted = Boolean(m.deleted_for_everyone);
+
+          const isAudio = m.message_type === 'audio' || (typeof m.content === 'string' && m.content.startsWith('data:audio'));
+          const isImage = m.message_type === 'image' || (typeof m.content === 'string' && m.content.startsWith('data:image'));
+          const isVideo = m.message_type === 'video' || (typeof m.content === 'string' && m.content.startsWith('data:video'));
+          const isFile = m.message_type === 'file' || (typeof m.content === 'string' && m.content.startsWith('data:application'));
 
           // Calculate status for own messages
           let status: MessageStatus = 'sent';
@@ -595,13 +610,41 @@ function ChatView({
             }
           }
 
+          const defaultText = isDeleted
+            ? '🚫 This message was deleted'
+            : isImage
+            ? 'Photo'
+            : isVideo
+            ? 'Video'
+            : isAudio
+            ? 'Voice message'
+            : isFile
+            ? (m.file_name || 'Document')
+            : m.content;
+
+          const deducedType = isDeleted
+            ? 'system'
+            : isImage
+            ? 'image'
+            : isVideo
+            ? 'video'
+            : isAudio
+            ? 'audio'
+            : isFile
+            ? 'file'
+            : (m.message_type || 'text');
+
           return {
             id: m.id,
             me: isMe,
-            text: isDeleted ? '🚫 This message was deleted' : (isImage ? 'Photo' : (isAudio ? 'Voice message' : m.content)),
-            message_type: isDeleted ? 'system' : (isImage ? 'image' : (isAudio ? 'audio' : (m.message_type || 'text'))),
+            text: defaultText,
+            message_type: deducedType,
             audio_url: isDeleted ? undefined : (isAudio ? m.content : undefined),
             image_url: isDeleted ? undefined : (isImage ? m.content : undefined),
+            video_url: isDeleted ? undefined : (isVideo ? m.content : undefined),
+            file_url: isDeleted ? undefined : (isFile ? m.content : undefined),
+            file_name: isDeleted ? undefined : (m.file_name || (isFile ? 'Document' : undefined)),
+            file_size: isDeleted ? undefined : m.file_size,
             reply_quote: isDeleted ? undefined : m.reply_quote,
             time: new Date(m.created_at).toTimeString().slice(0, 5),
             status,
@@ -647,18 +690,37 @@ function ChatView({
           if (msg.sender_id === user?.id) return;
 
           setMsgs((prev) => {
-            if (prev.some((m) => m.id === msg.id || (!m.me && (m.image_url === msg.content || m.audio_url === msg.content || m.text === msg.content)))) return prev;
+            if (prev.some((m) => m.id === msg.id || (!m.me && (m.image_url === msg.content || m.video_url === msg.content || m.file_url === msg.content || m.audio_url === msg.content || m.text === msg.content)))) return prev;
             const isAudio = msg.message_type === 'audio' || (typeof msg.content === 'string' && msg.content.startsWith('data:audio'));
             const isImage = msg.message_type === 'image' || (typeof msg.content === 'string' && msg.content.startsWith('data:image'));
+            const isVideo = msg.message_type === 'video' || (typeof msg.content === 'string' && msg.content.startsWith('data:video'));
+            const isFile = msg.message_type === 'file' || (typeof msg.content === 'string' && msg.content.startsWith('data:application'));
+
+            const displayText = isImage 
+              ? 'Photo' 
+              : isVideo 
+              ? 'Video' 
+              : isAudio 
+              ? 'Voice message' 
+              : isFile 
+              ? (msg.file_name || 'Document') 
+              : msg.content;
+
+            const deducedType = isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : isFile ? 'file' : (msg.message_type || 'text');
+
             return [
               ...prev,
               {
                 id: msg.id,
                 me: false,
-                text: isImage ? 'Photo' : (isAudio ? 'Voice message' : msg.content),
-                message_type: isImage ? 'image' : (isAudio ? 'audio' : (msg.message_type || 'text')),
+                text: displayText,
+                message_type: deducedType,
                 audio_url: isAudio ? (msg.audio_url || msg.content) : undefined,
                 image_url: isImage ? (msg.image_url || msg.content) : undefined,
+                video_url: isVideo ? (msg.video_url || msg.content) : undefined,
+                file_url: isFile ? (msg.file_url || msg.content) : undefined,
+                file_name: msg.file_name,
+                file_size: msg.file_size,
                 reply_quote: msg.reply_quote,
                 time: msg.time || new Date().toTimeString().slice(0, 5),
                 created_at: new Date().toISOString(),
@@ -802,9 +864,13 @@ function ChatView({
                     const matches =
                       (m.client_message_id && m.client_message_id === newMsg.client_message_id) ||
                       (m.image_url && m.image_url === newMsg.content) ||
+                      (m.video_url && m.video_url === newMsg.content) ||
+                      (m.file_url && m.file_url === newMsg.content) ||
                       (m.audio_url && m.audio_url === newMsg.content) ||
                       (m.text === newMsg.content) ||
                       (newMsg.message_type === 'image' && m.message_type === 'image') ||
+                      (newMsg.message_type === 'video' && m.message_type === 'video') ||
+                      (newMsg.message_type === 'file' && m.message_type === 'file') ||
                       (newMsg.message_type === 'audio' && m.message_type === 'audio');
                     if (matches) {
                       replaced = true;
@@ -839,20 +905,39 @@ function ChatView({
 
             setMsgs((prev) => {
               // Deduplicate if already present from broadcast
-              if (prev.some((m) => m.id === newMsg.id || (!m.me && (m.image_url === newMsg.content || m.audio_url === newMsg.content || m.text === newMsg.content)))) {
+              if (prev.some((m) => m.id === newMsg.id || (!m.me && (m.image_url === newMsg.content || m.video_url === newMsg.content || m.file_url === newMsg.content || m.audio_url === newMsg.content || m.text === newMsg.content)))) {
                 return prev;
               }
               const isAudio = newMsg.message_type === 'audio' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:audio'));
               const isImage = newMsg.message_type === 'image' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:image'));
+              const isVideo = newMsg.message_type === 'video' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:video'));
+              const isFile = newMsg.message_type === 'file' || (typeof newMsg.content === 'string' && newMsg.content.startsWith('data:application'));
+
+              const displayText = isImage
+                ? 'Photo'
+                : isVideo
+                ? 'Video'
+                : isAudio
+                ? 'Voice message'
+                : isFile
+                ? (newMsg.file_name || 'Document')
+                : newMsg.content;
+
+              const deducedType = isImage ? 'image' : isVideo ? 'video' : isAudio ? 'audio' : isFile ? 'file' : (newMsg.message_type || 'text');
+
               return [
                 ...prev,
                 {
                   id: newMsg.id,
                   me: false,
-                  text: isImage ? 'Photo' : (isAudio ? 'Voice message' : newMsg.content),
-                  message_type: isImage ? 'image' : (isAudio ? 'audio' : (newMsg.message_type || 'text')),
+                  text: displayText,
+                  message_type: deducedType,
                   audio_url: isAudio ? newMsg.content : undefined,
                   image_url: isImage ? newMsg.content : undefined,
+                  video_url: isVideo ? newMsg.content : undefined,
+                  file_url: isFile ? newMsg.content : undefined,
+                  file_name: newMsg.file_name,
+                  file_size: newMsg.file_size,
                   time: new Date(newMsg.created_at).toTimeString().slice(0, 5),
                   sequence_number: newMsg.sequence_number,
                   created_at: newMsg.created_at
@@ -1082,6 +1167,206 @@ function ChatView({
       console.error("Failed to process image:", err);
     } finally {
       setIsUploadingImage(false);
+    }
+  };
+
+  const handleVideoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    e.target.value = '';
+
+    // Max 25MB check
+    if (file.size > 25 * 1024 * 1024) {
+      alert("Please select a video under 25MB.");
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const videoDataUrl = event.target?.result as string;
+        if (!videoDataUrl) return;
+
+        const nowTime = new Date().toTimeString().slice(0, 5);
+        const clientMessageId = MessageOutboxService.generateClientId();
+        const currentReply = replyingTo;
+        setReplyingTo(null);
+
+        const newEntry = {
+          id: clientMessageId,
+          client_message_id: clientMessageId,
+          me: true,
+          text: "Video",
+          message_type: 'video',
+          video_url: videoDataUrl,
+          file_name: file.name,
+          file_size: file.size,
+          time: nowTime,
+          status: 'sending' as MessageStatus,
+          reply_quote: currentReply || undefined,
+          reactions: {},
+          created_at: new Date().toISOString()
+        };
+
+        setMsgs((m) => [...m, newEntry]);
+
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'new_msg',
+            payload: {
+              id: clientMessageId,
+              conversation_id: chat.id,
+              sender_id: user.id,
+              content: videoDataUrl,
+              message_type: 'video',
+              video_url: videoDataUrl,
+              file_name: file.name,
+              file_size: file.size,
+              time: nowTime,
+              reply_quote: currentReply
+            }
+          });
+        }
+
+        supabase.channel('global_messages_listener').send({
+          type: 'broadcast',
+          event: 'new_msg',
+          payload: {
+            id: clientMessageId,
+            conversation_id: chat.id,
+            sender_id: user.id,
+            content: "🎥 Video",
+            message_type: 'video',
+            time: nowTime
+          }
+        });
+
+        const result = await MessageOutboxService.send({
+          conversationId: chat.id,
+          senderId: user.id,
+          content: videoDataUrl,
+          messageType: 'video',
+          replyTo: currentReply?.id
+        });
+
+        if (result.message) {
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.id === clientMessageId
+                ? { ...m, id: result.message!.id, status: 'sent', sequence_number: result.message!.sequence_number }
+                : m
+            )
+          );
+        } else {
+          setMsgs((prev) =>
+            prev.map((m) => (m.id === clientMessageId ? { ...m, status: 'failed' } : m))
+          );
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error("Failed to read video file:", err);
+    }
+  };
+
+  const handleDocumentSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    e.target.value = '';
+
+    // Max 15MB check
+    if (file.size > 15 * 1024 * 1024) {
+      alert("Please select a document under 15MB.");
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const fileDataUrl = event.target?.result as string;
+        if (!fileDataUrl) return;
+
+        const nowTime = new Date().toTimeString().slice(0, 5);
+        const clientMessageId = MessageOutboxService.generateClientId();
+        const currentReply = replyingTo;
+        setReplyingTo(null);
+
+        const newEntry = {
+          id: clientMessageId,
+          client_message_id: clientMessageId,
+          me: true,
+          text: file.name,
+          message_type: 'file',
+          file_url: fileDataUrl,
+          file_name: file.name,
+          file_size: file.size,
+          time: nowTime,
+          status: 'sending' as MessageStatus,
+          reply_quote: currentReply || undefined,
+          reactions: {},
+          created_at: new Date().toISOString()
+        };
+
+        setMsgs((m) => [...m, newEntry]);
+
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'new_msg',
+            payload: {
+              id: clientMessageId,
+              conversation_id: chat.id,
+              sender_id: user.id,
+              content: fileDataUrl,
+              message_type: 'file',
+              file_url: fileDataUrl,
+              file_name: file.name,
+              file_size: file.size,
+              time: nowTime,
+              reply_quote: currentReply
+            }
+          });
+        }
+
+        supabase.channel('global_messages_listener').send({
+          type: 'broadcast',
+          event: 'new_msg',
+          payload: {
+            id: clientMessageId,
+            conversation_id: chat.id,
+            sender_id: user.id,
+            content: `📎 ${file.name}`,
+            message_type: 'file',
+            time: nowTime
+          }
+        });
+
+        const result = await MessageOutboxService.send({
+          conversationId: chat.id,
+          senderId: user.id,
+          content: fileDataUrl,
+          messageType: 'file',
+          replyTo: currentReply?.id
+        });
+
+        if (result.message) {
+          setMsgs((prev) =>
+            prev.map((m) =>
+              m.id === clientMessageId
+                ? { ...m, id: result.message!.id, status: 'sent', sequence_number: result.message!.sequence_number }
+                : m
+            )
+          );
+        } else {
+          setMsgs((prev) =>
+            prev.map((m) => (m.id === clientMessageId ? { ...m, status: 'failed' } : m))
+          );
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      console.error("Failed to read document file:", err);
     }
   };
 
@@ -1586,10 +1871,10 @@ function ChatView({
                         </div>
                       )}
 
-                      {/* Voice Note Audio, Photo, or Text message */}
+                      {/* Media Bubble: Audio, Photo, Video, Document, or Text */}
                       {m.message_type === 'audio' && m.audio_url ? (
                         <VoiceNoteBubble audioUrl={m.audio_url} isOwn={m.me} />
-                      ) : (m.message_type === 'image' || m.image_url || m.text?.startsWith('data:image')) ? (
+                      ) : (m.message_type === 'image' || m.image_url || (typeof m.text === 'string' && m.text.startsWith('data:image'))) ? (
                         <ImageBubble 
                           imageUrl={m.image_url || m.text} 
                           isOwn={m.me} 
@@ -1598,6 +1883,18 @@ function ChatView({
                             sender: m.me ? 'You' : chat.name, 
                             time: m.time 
                           })} 
+                        />
+                      ) : (m.message_type === 'video' || m.video_url || (typeof m.text === 'string' && m.text.startsWith('data:video'))) ? (
+                        <VideoBubble
+                          videoUrl={m.video_url || m.text}
+                          isOwn={m.me}
+                        />
+                      ) : (m.message_type === 'file' || m.file_url || (typeof m.text === 'string' && m.text.startsWith('data:application'))) ? (
+                        <DocumentBubble
+                          fileUrl={m.file_url || m.text}
+                          fileName={m.file_name || m.text}
+                          fileSize={m.file_size}
+                          isOwn={m.me}
                         />
                       ) : (
                         <span>{renderHighlightedText(m.text, matchedMsgIds[searchMatchIndex] === String(m.id))}</span>
@@ -1692,12 +1989,88 @@ function ChatView({
               accept="image/*" 
               className="hidden" 
             />
-            <IconBtn 
-              label="Attach Photo" 
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Plus className="h-5 w-5" />
-            </IconBtn>
+            <input 
+              type="file" 
+              ref={videoInputRef} 
+              onChange={handleVideoSelect} 
+              accept="video/*" 
+              className="hidden" 
+            />
+            <input 
+              type="file" 
+              ref={docInputRef} 
+              onChange={handleDocumentSelect} 
+              accept=".pdf,.doc,.docx,.txt,.xls,.xlsx,.csv,.zip,.rar" 
+              className="hidden" 
+            />
+
+            {/* iOS Action Sheet / Glass Attachment Menu */}
+            <div className="relative">
+              <AnimatePresence>
+                {showAttachMenu && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowAttachMenu(false)} 
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute bottom-14 left-0 z-50 flex flex-col gap-1 p-2 rounded-2xl glass-strong border border-white/20 shadow-2xl backdrop-blur-2xl min-w-[170px]"
+                    >
+                      <button
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          fileInputRef.current?.click();
+                        }}
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-white text-xs font-medium transition cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-teal-500/20 text-teal-300 flex items-center justify-center">
+                          <ImageIcon className="w-4 h-4" />
+                        </div>
+                        <span>Photo</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          videoInputRef.current?.click();
+                        }}
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-white text-xs font-medium transition cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center">
+                          <Film className="w-4 h-4" />
+                        </div>
+                        <span>Video</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowAttachMenu(false);
+                          docInputRef.current?.click();
+                        }}
+                        className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/10 text-white text-xs font-medium transition cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-300 flex items-center justify-center">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <span>Document</span>
+                      </button>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+
+              <IconBtn 
+                label="Attach media" 
+                onClick={() => setShowAttachMenu(!showAttachMenu)}
+              >
+                <Plus className={`h-5 w-5 transition-transform duration-200 ${showAttachMenu ? 'rotate-45' : ''}`} />
+              </IconBtn>
+            </div>
+
             <div className="glass flex flex-1 items-center rounded-full px-4 py-2.5">
               <input 
                 value={text} 

@@ -151,4 +151,21 @@ describe('Messaging Engine Core Logic', () => {
       expect(id1).not.toBe(id2);
     });
   });
+
+  describe('Media Attachment Message Types', () => {
+    it('identifies video and document attachment types accurately', () => {
+      const isVideoPayload = (content: string, type?: string) =>
+        type === 'video' || content.startsWith('data:video');
+      const isDocumentPayload = (content: string, type?: string) =>
+        type === 'file' || content.startsWith('data:application');
+
+      expect(isVideoPayload('data:video/mp4;base64,AAAA', 'video')).toBe(true);
+      expect(isVideoPayload('https://example.com/clip.mp4', 'video')).toBe(true);
+      expect(isVideoPayload('Hello', 'text')).toBe(false);
+
+      expect(isDocumentPayload('data:application/pdf;base64,JVBERi', 'file')).toBe(true);
+      expect(isDocumentPayload('https://example.com/sheet.xlsx', 'file')).toBe(true);
+      expect(isDocumentPayload('Hello world', 'text')).toBe(false);
+    });
+  });
 });

@@ -36,6 +36,10 @@ export interface EngineMessage {
   reactions?: Record<string, string[]>;
   audio_url?: string;
   image_url?: string;
+  video_url?: string;
+  file_url?: string;
+  file_name?: string;
+  file_size?: number;
   delivered_at?: string | null;
   read_at?: string | null;
   deleted_for_everyone?: boolean;
