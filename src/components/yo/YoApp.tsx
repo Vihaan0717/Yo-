@@ -51,7 +51,9 @@ import { WebRTCService } from "../../features/calls/webrtc/WebRTCService";
 import { AuthModal } from "../modals/AuthModal";
 import { CreateGroupModal } from "../modals/CreateGroupModal";
 import { GroupInfoDrawer } from "../modals/GroupInfoDrawer";
+import { NotificationSettingsModal } from "../modals/NotificationSettingsModal";
 import { NotificationService } from "../../services/notifications/NotificationService";
+import { VoiceAssistantService } from "../../services/voice/VoiceAssistantService";
 import { useAuth } from "../../contexts/AuthContext";
 import { supabase } from "../../services/supabase/client";
 import type { CallSession, Profile } from "../../types";
@@ -349,7 +351,7 @@ function Toggle({ initial = true }: { initial?: boolean }) {
   );
 }
 
-function SettingsTab({ onOpenAuth }: { onOpenAuth: () => void }) {
+function SettingsTab({ onOpenAuth, onOpenNotifications }: { onOpenAuth: () => void; onOpenNotifications?: () => void }) {
   const { user, signOut } = useAuth();
   const hue = user?.username ? (user.username.charCodeAt(0) * 37) % 360 : 190;
   
@@ -366,22 +368,13 @@ function SettingsTab({ onOpenAuth }: { onOpenAuth: () => void }) {
 
   const rows = [
     { icon: User, label: "Account", hue: 210, action: onOpenAuth }, 
-    { icon: Lock, label: "Privacy & Encryption", hue: 150 },
     { 
       icon: Bell, 
-      label: "Notifications", 
+      label: "AI Voice Assistant & Sounds", 
       hue: 20, 
-      toggle: true, 
-      action: async () => {
-        const ok = await NotificationService.requestPermission();
-        if (ok) {
-          NotificationService.showIncomingMessage({
-            title: "Yo!!! Notifications Active",
-            body: "You will receive alerts for new messages when Yo is running in background!"
-          }).then();
-        }
-      }
-    }, 
+      action: onOpenNotifications 
+    },
+    { icon: Lock, label: "Privacy & Encryption", hue: 150 }, 
     { icon: Moon, label: "Dark glass", hue: 270, toggle: true },
   ];
 
@@ -479,6 +472,7 @@ function ChatView({
   const [unreadCountAtOpen, setUnreadCountAtOpen] = useState<number>(0);
   const [pinnedMessage, setPinnedMessage] = useState<{ id: string; sender_name: string; content: string } | null>(null);
   const [groupDrawerOpen, setGroupDrawerOpen] = useState(false);
+  const [chatNotifModalOpen, setChatNotifModalOpen] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatchIndex, setSearchMatchIndex] = useState(0);
@@ -1617,6 +1611,9 @@ function ChatView({
         }}>
           <Search className="h-4 w-4" />
         </IconBtn>
+        <IconBtn label="Notification alerts" onClick={() => setChatNotifModalOpen(true)}>
+          <Bell className="h-4 w-4" />
+        </IconBtn>
         <IconBtn label="Voice call" onClick={() => onStartCall("audio", chat)}><Phone className="h-4 w-4" /></IconBtn>
         <IconBtn label="Video call" onClick={() => onStartCall("video", chat)}><Video className="h-4 w-4" /></IconBtn>
       </div>
@@ -2114,6 +2111,13 @@ function ChatView({
         onClose={() => setLightboxImage(null)}
       />
 
+      {/* Custom Chat Notification Settings Modal */}
+      <NotificationSettingsModal
+        isOpen={chatNotifModalOpen}
+        onClose={() => setChatNotifModalOpen(false)}
+        chat={chat}
+      />
+
       {/* Group Info / Members Drawer */}
       {chat.type === 'group' && (
         <GroupInfoDrawer
@@ -2145,6 +2149,7 @@ export function YoApp() {
 
   const [authOpen, setAuthOpen] = useState(false);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [globalNotifModalOpen, setGlobalNotifModalOpen] = useState(false);
   const [chatsList, setChatsList] = useState<Chat[]>([]);
 
   // WebRTC Calling state
@@ -2322,11 +2327,20 @@ export function YoApp() {
 
           // Fire local notification if user is outside this chat or app is in background
           if (!isCurrentlyReading) {
+            const senderName = chatsList.find((c) => c.id === targetConvId)?.name || 'Someone';
             NotificationService.showIncomingMessage({
-              title: "Yo!!! Message",
+              title: `Yo!!! ${senderName}`,
               body: preview,
               conversationId: targetConvId
             }).then();
+
+            // Trigger AI Voice Assistant announcement or custom tone!
+            VoiceAssistantService.handleIncomingAlert({
+              chatId: targetConvId,
+              senderName,
+              content: preview,
+              time: timeStr
+            });
           }
 
           setChatsList((prev) => 
@@ -2389,11 +2403,20 @@ export function YoApp() {
 
           // Fire local notification if user is outside this chat or app is in background
           if (!isCurrentlyReading) {
+            const senderName = chatsList.find((c) => c.id === targetConvId)?.name || 'Someone';
             NotificationService.showIncomingMessage({
-              title: "Yo!!! Message",
+              title: `Yo!!! ${senderName}`,
               body: preview,
               conversationId: targetConvId
             }).then();
+
+            // Trigger AI Voice Assistant announcement or custom tone!
+            VoiceAssistantService.handleIncomingAlert({
+              chatId: targetConvId,
+              senderName,
+              content: preview,
+              time: timeStr
+            });
           }
 
           setChatsList((prev) =>
@@ -2543,7 +2566,12 @@ export function YoApp() {
               )}
               {tab === "calls" && <CallsTab onStartCall={startCall} />}
               {tab === "people" && <PeopleTab onStartDirectChat={startDirectChat} />}
-              {tab === "settings" && <SettingsTab onOpenAuth={() => setAuthOpen(true)} />}
+              {tab === "settings" && (
+                <SettingsTab 
+                  onOpenAuth={() => setAuthOpen(true)} 
+                  onOpenNotifications={() => setGlobalNotifModalOpen(true)} 
+                />
+              )}
             </motion.div>
           </AnimatePresence>
         </div>
@@ -2606,6 +2634,12 @@ export function YoApp() {
 
       {/* Auth Modal for Supabase user signup & signin */}
       <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+
+      {/* Global AI Voice Assistant & Notification Settings Modal */}
+      <NotificationSettingsModal
+        isOpen={globalNotifModalOpen}
+        onClose={() => setGlobalNotifModalOpen(false)}
+      />
 
       {/* New Group Creation Modal */}
       <CreateGroupModal
