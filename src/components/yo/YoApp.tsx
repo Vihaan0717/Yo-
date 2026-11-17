@@ -3008,8 +3008,8 @@ export function YoApp() {
               targetUserId = profile.id;
               avatarUrl = profile.avatar_url || undefined;
             } else {
-              name = conv.title || "Direct Chat";
-              handle = "direct";
+              name = conv.title || "Yo User";
+              handle = "@user";
             }
           }
 
@@ -3132,6 +3132,12 @@ export function YoApp() {
 
           const targetConvId = msg.conversation_id || 'shared-direct-room';
           const isCurrentlyReading = openRef.current?.id === targetConvId;
+
+          // If this conversation is not yet in our chatsList (e.g. sent by a new person), refresh immediately!
+          const exists = chatsListRef.current.some((c) => c.id === targetConvId);
+          if (!exists) {
+            refreshConversations();
+          }
 
           // If message is real persisted ID, acknowledge delivery immediately on receiver device!
           if (msg.id && typeof msg.id === 'string' && !msg.id.startsWith('cmsg_') && !msg.id.startsWith('msg-')) {
@@ -3319,6 +3325,7 @@ export function YoApp() {
       name: targetUser.display_name,
       handle: `@${targetUser.username}`,
       hue,
+      avatar_url: targetUser.avatar_url || undefined,
       last: "",
       time: "Now",
       unread: 0,
