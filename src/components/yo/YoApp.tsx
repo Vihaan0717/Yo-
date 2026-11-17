@@ -192,7 +192,8 @@ function ChatsTab({
   onOpen, 
   onNewChat,
   onNewGroup,
-  onOpenProfile
+  onOpenProfile,
+  onPreviewAvatar
 }: { 
   chatsList: Chat[]; 
   archivedIds: string[];
@@ -203,6 +204,7 @@ function ChatsTab({
   onNewChat: () => void;
   onNewGroup: () => void;
   onOpenProfile?: () => void;
+  onPreviewAvatar?: (chat: Chat) => void;
 }) {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<string>("all");
@@ -497,7 +499,16 @@ function ChatsTab({
                   }}
                   className="flex w-full items-center gap-3 rounded-3xl px-3 py-3 text-left transition-colors hover:bg-glass cursor-pointer"
                 >
-                  <div className="relative">
+                  <div 
+                    className="relative cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      HapticsService.light();
+                      SoundEffectsService.playTap();
+                      onPreviewAvatar?.(c);
+                    }}
+                    title="Tap to view profile photo"
+                  >
                     <Avatar chat={c} />
                     {isLocked && (
                       <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white shadow-md">
@@ -567,9 +578,11 @@ function CallsTab({ onStartCall }: { onStartCall: (type: "audio" | "video", chat
 }
 
 function PeopleTab({ 
-  onStartDirectChat 
+  onStartDirectChat,
+  onPreviewAvatar
 }: { 
   onStartDirectChat: (targetUser: Profile) => void;
+  onPreviewAvatar?: (chat: Chat) => void;
 }) {
   const { user } = useAuth();
   const [search, setSearch] = useState("");
@@ -621,6 +634,7 @@ function PeopleTab({
               name: p.display_name,
               handle: `@${p.username}`,
               hue,
+              avatar_url: p.avatar_url || undefined,
               last: "",
               time: "",
               unread: 0,
@@ -630,7 +644,17 @@ function PeopleTab({
 
             return (
               <motion.li key={p.id} variants={itemV} className="flex items-center gap-3 rounded-3xl px-3 py-3 hover:bg-glass">
-                <Avatar chat={chatObj} size={46} />
+                <div 
+                  className="cursor-pointer"
+                  onClick={() => {
+                    HapticsService.light();
+                    SoundEffectsService.playTap();
+                    onPreviewAvatar?.(chatObj);
+                  }}
+                  title="View profile photo"
+                >
+                  <Avatar chat={chatObj} size={46} />
+                </div>
                 <div className="flex-1">
                   <div className="font-semibold">{p.display_name}</div>
                   <div className="text-xs text-muted-foreground">@{p.username}</div>
@@ -2825,6 +2849,9 @@ export function YoApp() {
     });
   };
 
+  // WhatsApp-style full screen Avatar viewer popup
+  const [avatarPreviewChat, setAvatarPreviewChat] = useState<Chat | null>(null);
+
   // Theme Preference State ('system' | 'light' | 'dark')
   const [themePref, setThemePref] = useState<ThemePreference>(() => {
     try {
@@ -3489,6 +3516,7 @@ export function YoApp() {
                   onNewChat={() => setTab("people")} 
                   onNewGroup={() => setGroupModalOpen(true)}
                   onOpenProfile={() => setProfileModalOpen(true)}
+                  onPreviewAvatar={(chat) => setAvatarPreviewChat(chat)}
                 />
               )}
               {tab === "updates" && (
@@ -3518,7 +3546,12 @@ export function YoApp() {
                 />
               )}
               {tab === "calls" && <CallsTab onStartCall={startCall} />}
-              {tab === "people" && <PeopleTab onStartDirectChat={startDirectChat} />}
+              {tab === "people" && (
+                <PeopleTab 
+                  onStartDirectChat={startDirectChat} 
+                  onPreviewAvatar={(chat) => setAvatarPreviewChat(chat)}
+                />
+              )}
               {tab === "settings" && (
                 <SettingsTab 
                   onOpenAuth={() => setAuthOpen(true)} 
@@ -3741,6 +3774,107 @@ export function YoApp() {
         isOpen={globalNotifModalOpen}
         onClose={() => setGlobalNotifModalOpen(false)}
       />
+
+      {/* WhatsApp-Style Circular Avatar Zoom & Profile Card Viewer */}
+      {avatarPreviewChat && (
+        <div 
+          onClick={() => setAvatarPreviewChat(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <motion.div 
+            initial={{ scale: 0.65, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.65, opacity: 0 }}
+            transition={{ type: "spring", damping: 25, stiffness: 350 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xs rounded-[32px] overflow-hidden glass-strong border border-white/20 shadow-2xl bg-[#0b0f19] flex flex-col items-center"
+          >
+            {/* Top Bar with Name & Close */}
+            <div className="w-full px-4 py-3 flex items-center justify-between bg-black/40 border-b border-white/10">
+              <span className="font-bold text-sm text-white truncate">{avatarPreviewChat.name}</span>
+              <button
+                onClick={() => setAvatarPreviewChat(null)}
+                className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Profile Picture Canvas / Image */}
+            <div className="w-full aspect-square relative bg-slate-950 flex items-center justify-center overflow-hidden">
+              {avatarPreviewChat.avatar_url ? (
+                <img
+                  src={avatarPreviewChat.avatar_url}
+                  alt={avatarPreviewChat.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div
+                  className="w-full h-full grid place-items-center font-extrabold text-5xl text-white select-none"
+                  style={{
+                    background: `linear-gradient(135deg, oklch(0.68 0.18 ${avatarPreviewChat.hue || 210}), oklch(0.48 0.18 ${(avatarPreviewChat.hue || 210) + 35}))`
+                  }}
+                >
+                  {(avatarPreviewChat.name || "Y").slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
+
+            {/* WhatsApp Bottom Quick-Action Toolbar */}
+            <div className="w-full p-3 flex items-center justify-around bg-black/50 border-t border-white/10">
+              <button
+                onClick={() => {
+                  const target = avatarPreviewChat;
+                  setAvatarPreviewChat(null);
+                  openRef.current = target;
+                  setOpen(target);
+                }}
+                className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
+                title="Message"
+              >
+                <MessageCircle className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={() => {
+                  const target = avatarPreviewChat;
+                  setAvatarPreviewChat(null);
+                  startCall("audio", target);
+                }}
+                className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
+                title="Audio Call"
+              >
+                <Phone className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={() => {
+                  const target = avatarPreviewChat;
+                  setAvatarPreviewChat(null);
+                  startCall("video", target);
+                }}
+                className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
+                title="Video Call"
+              >
+                <Video className="w-5 h-5" />
+              </button>
+
+              <button
+                onClick={() => {
+                  const target = avatarPreviewChat;
+                  setAvatarPreviewChat(null);
+                  openRef.current = target;
+                  setOpen(target);
+                }}
+                className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
+                title="View Info"
+              >
+                <Info className="w-5 h-5" />
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* New Group Creation Modal */}
       <CreateGroupModal
