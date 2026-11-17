@@ -15,71 +15,108 @@ export interface ProcessedImage {
 
 export class ImageService {
   /**
-   * Compresses a File into a lightweight Data URL
+   * Compresses a File into a lightweight Data URL asynchronously with createImageBitmap or Image element
    */
   static async processImageFile(file: File, maxDimension = 1280, quality = 0.78): Promise<ProcessedImage> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          let { width, height } = img;
+    // 1. Try modern fast createImageBitmap if supported to avoid blocking main thread
+    if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+      try {
+        const bitmap = await createImageBitmap(file);
+        let { width, height } = bitmap;
 
-          // Scale down if exceeding maxDimension
-          if (width > maxDimension || height > maxDimension) {
-            if (width > height) {
-              height = Math.round((height * maxDimension) / width);
-              width = maxDimension;
-            } else {
-              width = Math.round((width * maxDimension) / height);
-              height = maxDimension;
-            }
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
           }
+        }
 
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error('Failed to get canvas 2d context'));
-            return;
-          }
-
-          // Smooth resampling
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
           ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = 'high';
-          ctx.drawImage(img, 0, 0, width, height);
+          ctx.imageSmoothingQuality = 'medium';
+          ctx.drawImage(bitmap, 0, 0, width, height);
+          bitmap.close();
 
-          // Attempt WebP, fallback to JPEG
-          let mimeType = 'image/webp';
+          let mimeType = 'image/jpeg';
           let dataUrl = canvas.toDataURL(mimeType, quality);
-
-          // If browser doesn't support WebP export properly, fallback to jpeg
-          if (!dataUrl.startsWith('data:image/webp')) {
-            mimeType = 'image/jpeg';
-            dataUrl = canvas.toDataURL(mimeType, quality);
-          }
-
-          // Calculate approximate byte size
           const head = dataUrl.indexOf(',') + 1;
           const sizeBytes = Math.round((dataUrl.length - head) * 0.75);
 
-          resolve({
+          return {
             dataUrl,
             width,
             height,
             sizeBytes,
             mimeType
-          });
-        };
+          };
+        }
+      } catch (bitmapErr) {
+        // Fallback to Image element below
+      }
+    }
 
-        img.onerror = () => reject(new Error('Failed to decode image file'));
-        img.src = e.target?.result as string;
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const objectUrl = URL.createObjectURL(file);
+
+      img.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        let { width, height } = img;
+
+        // Scale down if exceeding maxDimension
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Failed to get canvas 2d context'));
+          return;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'medium';
+        ctx.drawImage(img, 0, 0, width, height);
+
+        let mimeType = 'image/jpeg';
+        let dataUrl = canvas.toDataURL(mimeType, quality);
+
+        // Calculate approximate byte size
+        const head = dataUrl.indexOf(',') + 1;
+        const sizeBytes = Math.round((dataUrl.length - head) * 0.75);
+
+        resolve({
+          dataUrl,
+          width,
+          height,
+          sizeBytes,
+          mimeType
+        });
       };
 
-      reader.onerror = () => reject(new Error('Failed to read image file'));
-      reader.readAsDataURL(file);
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Failed to decode image file'));
+      };
+
+      img.src = objectUrl;
     });
   }
 }

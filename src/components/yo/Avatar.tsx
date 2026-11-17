@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Chat } from "./data";
 
 export function Avatar({ 
@@ -14,6 +14,11 @@ export function Avatar({
 }) {
   const [imgError, setImgError] = useState(false);
   const resolvedUrl = avatarUrl || chat?.avatar_url;
+
+  // Reset imgError whenever the avatarUrl or chat avatar changes so newly uploaded photos display immediately
+  useEffect(() => {
+    setImgError(false);
+  }, [resolvedUrl]);
 
   const displayName = chat?.name || "Yo User";
   const initials = displayName

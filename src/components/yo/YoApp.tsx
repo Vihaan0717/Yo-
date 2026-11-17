@@ -188,6 +188,7 @@ function ChatsTab({
   archivedIds,
   lockedIds,
   favoritesIds,
+  currentUser,
   onOpen, 
   onNewChat,
   onNewGroup,
@@ -197,6 +198,7 @@ function ChatsTab({
   archivedIds: string[];
   lockedIds: string[];
   favoritesIds: string[];
+  currentUser?: Profile | null;
   onOpen: (c: Chat) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
@@ -306,11 +308,18 @@ function ChatsTab({
                     SoundEffectsService.playDrawerOpen();
                     onOpenProfile?.();
                   }}
-                  className="px-3 py-1.5 rounded-full glass hover:bg-secondary text-xs font-semibold text-primary border border-primary/30 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  className="px-2.5 py-1.5 rounded-full glass hover:bg-secondary text-xs font-semibold text-primary border border-primary/30 flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-transform"
                   title="My Profile Photo & Info"
                 >
-                  <User className="w-3.5 h-3.5" />
-                  <span>Profile</span>
+                  <Avatar
+                    chat={{
+                      name: currentUser?.display_name || 'Profile',
+                      avatar_url: currentUser?.avatar_url,
+                      hue: currentUser?.username ? (currentUser.username.charCodeAt(0) * 37) % 360 : 210
+                    }}
+                    size={22}
+                  />
+                  <span className="max-w-[70px] truncate">{currentUser?.display_name || 'Profile'}</span>
                 </button>
                 <IconBtn label="New group" onClick={onNewGroup}>
                   <Users className="h-4 w-4" />
@@ -2017,8 +2026,8 @@ function ChatView({
       initial={{ x: "100%" }} 
       animate={{ x: 0 }} 
       exit={{ x: "100%" }} 
-      transition={{ type: "tween", duration: 0.18, ease: "easeInOut" }}
-      className="absolute inset-0 z-30 flex flex-col bg-background/60 backdrop-blur-2xl"
+      transition={{ type: "tween", duration: 0.16, ease: [0.25, 1, 0.5, 1] }}
+      className="absolute inset-0 z-30 flex flex-col bg-background/90 backdrop-blur-xl will-change-transform"
     >
       <div className="glass-strong flex items-center gap-2.5 rounded-none border-x-0 border-t-0 px-3 pb-3 pt-12 sm:pt-3">
         <button 
@@ -3447,14 +3456,21 @@ export function YoApp() {
       <main className="relative mx-auto h-screen max-w-md overflow-hidden shadow-2xl border-x border-border flex flex-col justify-between">
         <div className="h-full overflow-y-auto">
           <AnimatePresence mode="popLayout" initial={false}>
-            <motion.div key={tab} initial={{ opacity: 0, y: 12, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={{ opacity: 0, y: -8, filter: "blur(6px)" }} transition={{ duration: 0.18, ease: "easeOut" }}>
+            <motion.div 
+              key={tab} 
+              initial={{ opacity: 0, y: 8 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -6 }} 
+              transition={{ duration: 0.14, ease: "easeOut" }}
+              className="will-change-[opacity,transform]"
+            >
               {tab === "chats" && (
                 <ChatsTab 
                   chatsList={chatsList} 
                   archivedIds={archivedIds}
                   lockedIds={lockedIds}
                   favoritesIds={favoritesIds}
+                  currentUser={user}
                   onOpen={(c) => {
                     openRef.current = c;
                     setLocalLastRead(user?.id, c.id);

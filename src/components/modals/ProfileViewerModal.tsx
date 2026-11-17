@@ -171,7 +171,11 @@ export const ProfileViewerModal: React.FC<ProfileViewerModalProps> = ({
           <div className="overflow-y-auto space-y-4 py-3 flex-1 pr-0.5">
             {/* Profile Photo Section (WhatsApp Style) */}
             <div className="flex flex-col items-center pt-2">
-              <div className="relative group">
+              <div 
+                onClick={handlePickPhoto}
+                className="relative group cursor-pointer"
+                title="Tap anywhere to change profile photo from gallery"
+              >
                 <Avatar
                   chat={{ name: user.display_name, hue: 210, avatar_url: user.avatar_url }}
                   size={104}
@@ -181,7 +185,10 @@ export const ProfileViewerModal: React.FC<ProfileViewerModalProps> = ({
                 {/* Camera badge to choose from Gallery / Camera */}
                 <button
                   type="button"
-                  onClick={handlePickPhoto}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePickPhoto();
+                  }}
                   disabled={isUploading}
                   className="absolute bottom-0 right-0 p-2.5 rounded-full bg-primary text-primary-foreground shadow-glow hover:scale-105 active:scale-95 transition-transform cursor-pointer border-2 border-card"
                   title="Choose from gallery"
