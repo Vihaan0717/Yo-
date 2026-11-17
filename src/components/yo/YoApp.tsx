@@ -2727,6 +2727,7 @@ export function YoApp() {
   const [open, setOpen] = useState<Chat | null>(null);
   const openRef = useRef<Chat | null>(null);
   const seenMsgIdsRef = useRef<Set<string>>(new Set());
+  const alertedMsgKeysRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     openRef.current = open;
   }, [open]);
@@ -3151,21 +3152,30 @@ export function YoApp() {
 
           // Fire local notification if user is outside this chat or app is in background
           if (!isCurrentlyReading) {
-            const senderName = msg.sender_name || chatsListRef.current.find((c) => c.id === targetConvId)?.name || 'Someone';
-            NotificationService.showIncomingMessage({
-              title: `Yo!!! ${senderName}`,
-              body: preview,
-              conversationId: targetConvId
-            }).then();
+            const alertKey = msg.id ? String(msg.id) : `${targetConvId}_${preview}_${timeStr}`;
+            if (!alertedMsgKeysRef.current.has(alertKey)) {
+              alertedMsgKeysRef.current.add(alertKey);
+              if (alertedMsgKeysRef.current.size > 200) {
+                const first = alertedMsgKeysRef.current.values().next().value;
+                if (first) alertedMsgKeysRef.current.delete(first);
+              }
 
-            // Trigger AI Voice Assistant announcement or custom tone!
-            VoiceAssistantService.handleIncomingAlert({
-              chatId: targetConvId,
-              senderName,
-              content: preview,
-              time: timeStr,
-              messageId: msg.id ? String(msg.id) : undefined
-            });
+              const senderName = msg.sender_name || chatsListRef.current.find((c) => c.id === targetConvId)?.name || 'Someone';
+              NotificationService.showIncomingMessage({
+                title: senderName,
+                body: preview,
+                conversationId: targetConvId
+              }).then();
+
+              // Trigger AI Voice Assistant announcement or custom tone!
+              VoiceAssistantService.handleIncomingAlert({
+                chatId: targetConvId,
+                senderName,
+                content: preview,
+                time: timeStr,
+                messageId: msg.id ? String(msg.id) : undefined
+              });
+            }
           }
 
           setChatsList((prev) => 
@@ -3234,21 +3244,30 @@ export function YoApp() {
 
           // Fire local notification if user is outside this chat or app is in background
           if (!isCurrentlyReading) {
-            const senderName = newMsg.sender_name || chatsListRef.current.find((c) => c.id === targetConvId)?.name || 'Someone';
-            NotificationService.showIncomingMessage({
-              title: `Yo!!! ${senderName}`,
-              body: preview,
-              conversationId: targetConvId
-            }).then();
+            const alertKey = newMsg.id ? String(newMsg.id) : `${targetConvId}_${preview}_${timeStr}`;
+            if (!alertedMsgKeysRef.current.has(alertKey)) {
+              alertedMsgKeysRef.current.add(alertKey);
+              if (alertedMsgKeysRef.current.size > 200) {
+                const first = alertedMsgKeysRef.current.values().next().value;
+                if (first) alertedMsgKeysRef.current.delete(first);
+              }
 
-            // Trigger AI Voice Assistant announcement or custom tone!
-            VoiceAssistantService.handleIncomingAlert({
-              chatId: targetConvId,
-              senderName,
-              content: preview,
-              time: timeStr,
-              messageId: newMsg.id ? String(newMsg.id) : undefined
-            });
+              const senderName = newMsg.sender_name || chatsListRef.current.find((c) => c.id === targetConvId)?.name || 'Someone';
+              NotificationService.showIncomingMessage({
+                title: senderName,
+                body: preview,
+                conversationId: targetConvId
+              }).then();
+
+              // Trigger AI Voice Assistant announcement or custom tone!
+              VoiceAssistantService.handleIncomingAlert({
+                chatId: targetConvId,
+                senderName,
+                content: preview,
+                time: timeStr,
+                messageId: newMsg.id ? String(newMsg.id) : undefined
+              });
+            }
           }
 
           setChatsList((prev) =>

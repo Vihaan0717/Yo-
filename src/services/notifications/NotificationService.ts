@@ -52,12 +52,31 @@ export class NotificationService {
   }
 
   /**
-   * Initialize and request permission on first interaction
+   * Initialize notification channels and permissions
    */
   static async init() {
     if (this.isInitialized) return;
     this.isInitialized = true;
     this.permissionGranted = await this.hasPermission();
+
+    // Create high-importance Android notification channel for heads-up & lockscreen popups
+    if (Capacitor.isNativePlatform()) {
+      try {
+        await LocalNotifications.createChannel({
+          id: 'yo_messages_high_priority',
+          name: 'Direct Messages',
+          description: 'High-priority incoming direct messages and voice alerts',
+          importance: 5, // IMPORTANCE_HIGH (pops up over screen and lights display)
+          visibility: 1, // VISIBILITY_PUBLIC (shows message on lock screen)
+          sound: undefined,
+          vibration: true,
+          lights: true,
+          lightColor: '#00F2FE'
+        });
+      } catch (err) {
+        console.warn('Could not create notification channel:', err);
+      }
+    }
   }
 
   /**
@@ -76,6 +95,11 @@ export class NotificationService {
     avatar?: string;
   }) {
     try {
+      // Ensure channel is initialized
+      if (!this.isInitialized) {
+        await this.init();
+      }
+
       // If native Android / iOS
       if (Capacitor.isNativePlatform()) {
         const hasPerm = await this.hasPermission();
@@ -91,7 +115,8 @@ export class NotificationService {
               title,
               body,
               id,
-              schedule: { at: new Date(Date.now() + 100) },
+              schedule: { at: new Date(Date.now() + 50) },
+              channelId: 'yo_messages_high_priority',
               sound: undefined,
               extra: { conversationId },
               smallIcon: 'ic_launcher'

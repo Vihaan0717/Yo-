@@ -208,33 +208,55 @@ export class VoiceAssistantService {
     }
   }
 
+  private static unlocked = false;
+
+  /**
+   * Unlock speech synthesis & Web Audio on first user interaction.
+   * Required by Android WebView / Chrome autoplay policy.
+   */
+  static unlock() {
+    if (this.unlocked || typeof window === 'undefined') return;
+    this.unlocked = true;
+    try {
+      this.getAudioContext();
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.resume();
+        const silent = new SpeechSynthesisUtterance(' ');
+        silent.volume = 0.01;
+        window.speechSynthesis.speak(silent);
+      }
+    } catch (e) {
+      // Ignored
+    }
+  }
+
   /**
    * Speak announcement using Web SpeechSynthesis API:
    * "You have a message from [sender] at [time]: [content]"
    */
   static speak(text: string) {
+    const settings = this.getSettings();
+    // Always trigger the sound alert tone first
+    this.playTone(settings.defaultSound || 'bubble');
+
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      this.playTone('bubble');
       return;
     }
 
     try {
-      // Resume context if suspended (essential on Android/Chrome)
-      if (window.speechSynthesis.paused) {
-        window.speechSynthesis.resume();
-      }
-      window.speechSynthesis.cancel(); // Stop any pending speech
+      // Resume context if suspended or paused (essential on Android/Chrome WebView)
+      window.speechSynthesis.resume();
+      window.speechSynthesis.cancel(); // Stop previous utterance
 
-      const settings = this.getSettings();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = settings.voiceSpeed || 1.0;
       utterance.pitch = settings.voicePitch || 1.05;
       utterance.lang = 'en-US';
 
-      // Always play a crisp sound tone alongside speech as an immediate acoustic cue
-      this.playTone(settings.defaultSound || 'bubble');
+      // Keep utterance reference in memory to avoid Android WebView GC bug
+      (window as any).__yo_last_utterance = utterance;
 
-      const assignVoiceAndSpeak = () => {
+      const doSpeak = () => {
         try {
           const voices = window.speechSynthesis.getVoices();
           if (voices && voices.length > 0) {
@@ -253,16 +275,14 @@ export class VoiceAssistantService {
       if (!voices || voices.length === 0) {
         window.speechSynthesis.onvoiceschanged = () => {
           window.speechSynthesis.onvoiceschanged = null;
-          assignVoiceAndSpeak();
+          doSpeak();
         };
-        // Fallback speak in case onvoiceschanged does not fire
-        setTimeout(assignVoiceAndSpeak, 150);
+        setTimeout(doSpeak, 100);
       } else {
-        assignVoiceAndSpeak();
+        doSpeak();
       }
     } catch (err) {
       console.warn('Speech synthesis error:', err);
-      this.playTone('bubble');
     }
   }
 
