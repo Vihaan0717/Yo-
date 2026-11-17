@@ -107,7 +107,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
           initial={{ opacity: 0, scale: 0.94, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.94, y: 15 }}
-          className="glass-panel w-full max-w-sm rounded-3xl p-5 relative overflow-hidden border border-white/10 shadow-2xl bg-[#0e1524]/95"
+          className="glass-panel w-full max-w-sm rounded-3xl p-5 relative border border-white/10 shadow-2xl bg-[#0e1524]/95 max-h-[90vh] flex flex-col justify-between"
         >
           {/* Header */}
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
@@ -154,14 +154,17 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                   </select>
                 ) : (
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={globalSettings.voiceAnnounceEnabled}
                     onClick={() => updateGlobalVoice(!globalSettings.voiceAnnounceEnabled)}
-                    className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                    className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer flex items-center p-0.5 shrink-0 ${
                       globalSettings.voiceAnnounceEnabled ? 'bg-teal-500' : 'bg-white/20'
                     }`}
                   >
                     <span
-                      className={`block w-4 h-4 rounded-full bg-white shadow-md transform transition-transform mt-1 ml-1 ${
-                        globalSettings.voiceAnnounceEnabled ? 'translate-x-5' : 'translate-x-0'
+                      className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                        globalSettings.voiceAnnounceEnabled ? 'translate-x-5.5' : 'translate-x-0.5'
                       }`}
                     />
                   </button>
@@ -188,13 +191,13 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                 </div>
                 <button
                   onClick={() => updateChatMute(!chatConfig.muted)}
-                  className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer flex items-center p-0.5 shrink-0 ${
                     chatConfig.muted ? 'bg-red-500' : 'bg-white/20'
                   }`}
                 >
                   <span
-                    className={`block w-4 h-4 rounded-full bg-white shadow-md transform transition-transform mt-1 ml-1 ${
-                      chatConfig.muted ? 'translate-x-5' : 'translate-x-0'
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      chatConfig.muted ? 'translate-x-5.5' : 'translate-x-0.5'
                     }`}
                   />
                 </button>
@@ -229,7 +232,7 @@ export const NotificationSettingsModal: React.FC<NotificationSettingsModalProps>
                       initial={{ opacity: 0, y: -5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -5 }}
-                      className="absolute left-0 right-0 top-11 z-20 rounded-xl glass-strong border border-white/15 shadow-xl overflow-hidden py-1 divide-y divide-white/5"
+                      className="absolute left-0 right-0 top-11 z-50 rounded-xl glass-strong border border-white/20 shadow-2xl overflow-y-auto max-h-48 py-1 divide-y divide-white/5 bg-[#121b2d]"
                     >
                       {soundOptions.map((opt) => (
                         <div

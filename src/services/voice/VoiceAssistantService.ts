@@ -229,6 +229,10 @@ export class VoiceAssistantService {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = settings.voiceSpeed || 1.0;
       utterance.pitch = settings.voicePitch || 1.05;
+      utterance.lang = 'en-US';
+
+      // Always play a crisp sound tone alongside speech as an immediate acoustic cue
+      this.playTone(settings.defaultSound || 'bubble');
 
       const assignVoiceAndSpeak = () => {
         try {
