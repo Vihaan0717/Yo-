@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 import type { CallSession, Profile } from '../../../types';
+import { Avatar } from '../../../components/yo/Avatar';
+import { SoundEffectsService } from '../../../services/feedback/SoundEffectsService';
+import { HapticsService } from '../../../services/feedback/HapticsService';
 
 interface CallOverlayProps {
   session: CallSession;
@@ -28,6 +31,21 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
+  // Play outgoing ringtone while waiting for peer / connecting
+  useEffect(() => {
+    let interval: any = null;
+    if (session.status === 'ringing') {
+      SoundEffectsService.playRingtoneBurst();
+      HapticsService.light();
+      interval = setInterval(() => {
+        SoundEffectsService.playRingtoneBurst();
+      }, 2400);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [session.status]);
+
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
@@ -41,39 +59,40 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
   }, [remoteStream]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-2xl p-4 sm:p-6">
-      <div className="relative w-full max-w-4xl h-[85vh] rounded-3xl overflow-hidden glass-panel border border-white/10 flex flex-col justify-between shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-2xl p-3 sm:p-6">
+      <div className="relative w-full max-w-md h-[92vh] sm:h-[85vh] rounded-[36px] overflow-hidden glass-strong border border-white/10 flex flex-col justify-between shadow-2xl bg-[#0b0f19]">
         
         {/* Call Header */}
-        <div className="p-6 flex items-center justify-between z-10 bg-gradient-to-b from-black/60 to-transparent">
+        <div className="px-5 pt-12 pb-4 flex items-center justify-between z-10 bg-gradient-to-b from-black/80 to-transparent">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl overflow-hidden border border-white/20">
-              <img
-                src={otherUser?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}
-                alt=""
-                className="w-full h-full object-cover"
-              />
-            </div>
+            <Avatar 
+              chat={{
+                name: otherUser?.display_name || 'Yo Peer',
+                avatar_url: otherUser?.avatar_url,
+                hue: otherUser?.username ? (otherUser.username.charCodeAt(0) * 37) % 360 : 210
+              }} 
+              size={48} 
+            />
             <div>
-              <h3 className="font-semibold text-lg text-white">{otherUser?.display_name || 'Yo Peer'}</h3>
-              <p className="text-xs text-indigo-400 flex items-center gap-1.5">
+              <h3 className="font-bold text-base text-white">{otherUser?.display_name || 'Yo Peer'}</h3>
+              <p className="text-xs text-primary flex items-center gap-1.5 mt-0.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                {session.status === 'ringing' ? 'Connecting WebRTC P2P stream...' : 'Encrypted WebRTC Session'}
+                <span>{session.status === 'ringing' ? 'Ringing...' : 'Connected (E2EE WebRTC)'}</span>
               </p>
             </div>
           </div>
 
-          <div className="px-3.5 py-1.5 rounded-full glass-panel-subtle text-xs text-slate-300 font-mono tracking-wider border border-white/10">
-            {session.call_type.toUpperCase()} CALL
+          <div className="px-3 py-1 rounded-full glass text-[10px] text-slate-300 font-semibold tracking-wider border border-white/10 uppercase">
+            {session.call_type} Call
           </div>
         </div>
 
-        {/* Video or Audio Visualizer Stage */}
+        {/* Video or Audio Stage */}
         <div className="relative flex-1 flex items-center justify-center overflow-hidden">
           {session.call_type === 'video' ? (
             <>
-              {/* Remote full video */}
-              <div className="absolute inset-0 bg-slate-900 flex items-center justify-center">
+              {/* Remote Video */}
+              <div className="absolute inset-0 bg-slate-950 flex items-center justify-center">
                 {remoteStream ? (
                   <video
                     ref={remoteVideoRef}
@@ -82,22 +101,25 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="text-center p-6">
-                    <div className="w-24 h-24 rounded-full mx-auto mb-4 overflow-hidden border-2 border-indigo-500/50 shadow-xl shadow-indigo-500/20">
-                      <img
-                        src={otherUser?.avatar_url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <p className="text-white font-medium">Waiting for video stream...</p>
-                    <p className="text-xs text-slate-400 mt-1">WebRTC NAT/STUN traversal active</p>
+                  <div className="text-center p-6 flex flex-col items-center">
+                    <Avatar 
+                      chat={{
+                        name: otherUser?.display_name || 'Yo Peer',
+                        avatar_url: otherUser?.avatar_url,
+                        hue: 220
+                      }} 
+                      size={96} 
+                    />
+                    <p className="text-white font-semibold text-sm mt-4">
+                      {session.status === 'ringing' ? 'Calling...' : 'Waiting for video stream...'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1">Google STUN P2P active</p>
                   </div>
                 )}
               </div>
 
-              {/* Local PiP camera preview */}
-              <div className="absolute bottom-6 right-6 w-36 h-48 sm:w-44 sm:h-60 rounded-2xl overflow-hidden glass-panel border border-white/20 shadow-2xl z-20">
+              {/* Local Video Camera Preview */}
+              <div className="absolute bottom-5 right-5 w-28 h-40 sm:w-36 sm:h-48 rounded-2xl overflow-hidden glass border border-white/20 shadow-2xl z-20">
                 <video
                   ref={localVideoRef}
                   autoPlay
@@ -106,40 +128,41 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                   className={`w-full h-full object-cover ${isVideoMuted ? 'hidden' : ''}`}
                 />
                 {isVideoMuted && (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900/80 text-slate-400">
-                    <VideoOff className="w-8 h-8 mb-2" />
-                    <span className="text-[10px]">Camera Off</span>
+                  <div className="w-full h-full bg-slate-800 flex items-center justify-center text-[10px] text-slate-400">
+                    Camera Off
                   </div>
                 )}
-                <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-md bg-black/60 text-[10px] text-white backdrop-blur-sm">
-                  You
-                </div>
               </div>
             </>
           ) : (
-            /* Audio Call Experience */
+            /* Audio Call UI */
             <div className="flex flex-col items-center justify-center text-center p-6">
               <div className="relative mb-6">
-                <div className="w-32 h-32 rounded-3xl overflow-hidden border-2 border-indigo-500/40 shadow-2xl shadow-indigo-500/30">
-                  <img
-                    src={otherUser?.avatar_url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="absolute -inset-2 rounded-3xl border border-indigo-500/20 animate-pulse pointer-events-none" />
+                <Avatar 
+                  chat={{
+                    name: otherUser?.display_name || 'Yo Peer',
+                    avatar_url: otherUser?.avatar_url,
+                    hue: otherUser?.username ? (otherUser.username.charCodeAt(0) * 37) % 360 : 210
+                  }} 
+                  size={120} 
+                />
+                <div className="absolute -inset-3 rounded-full border border-primary/30 animate-pulse pointer-events-none" />
               </div>
 
-              <h2 className="text-2xl font-bold text-white mb-2">{otherUser?.display_name}</h2>
-              <p className="text-slate-400 text-sm">@{otherUser?.username}</p>
+              <h2 className="text-2xl font-bold text-white mb-1">{otherUser?.display_name}</h2>
+              <p className="text-slate-400 text-xs">@{otherUser?.username || 'contact'}</p>
               
-              {/* Audio wave animation */}
-              <div className="flex items-center gap-1.5 mt-8 h-8">
-                {[40, 75, 55, 95, 60, 80, 45, 90, 70, 40].map((h, i) => (
+              <div className="text-xs text-primary font-medium mt-3">
+                {session.status === 'ringing' ? 'Ringing cellular audio...' : '00:14 · High-Fidelity Audio'}
+              </div>
+
+              {/* Audio visualizer wave */}
+              <div className="flex items-center gap-1.5 mt-7 h-8">
+                {[35, 70, 50, 90, 65, 80, 45, 85, 60, 40].map((h, i) => (
                   <span
                     key={i}
                     style={{ height: `${h}%` }}
-                    className="w-1.5 bg-gradient-to-t from-indigo-500 to-purple-400 rounded-full animate-bounce"
+                    className="w-1 bg-gradient-to-t from-primary to-accent rounded-full animate-pulse"
                   />
                 ))}
               </div>
@@ -147,36 +170,46 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
           )}
         </div>
 
-        {/* Floating Call Action Dock */}
-        <div className="p-6 flex items-center justify-center gap-4 z-20 bg-gradient-to-t from-black/80 to-transparent">
+        {/* Floating Call Action Controls */}
+        <div className="p-6 flex items-center justify-center gap-5 z-20 bg-gradient-to-t from-black/90 to-transparent">
           <button
-            onClick={onToggleAudio}
-            className={`p-4 rounded-2xl glass-panel border border-white/10 transition cursor-pointer ${
-              isAudioMuted ? 'bg-red-500/30 text-red-300' : 'text-white hover:bg-white/10'
+            onClick={() => {
+              HapticsService.light();
+              onToggleAudio();
+            }}
+            className={`p-3.5 rounded-full glass border border-white/10 transition cursor-pointer active:scale-90 ${
+              isAudioMuted ? 'bg-red-500/30 text-red-300 border-red-500/40' : 'text-white hover:bg-white/10'
             }`}
-            title={isAudioMuted ? 'Unmute' : 'Mute'}
+            title={isAudioMuted ? 'Unmute microphone' : 'Mute microphone'}
           >
-            {isAudioMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+            {isAudioMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
           </button>
 
           {session.call_type === 'video' && (
             <button
-              onClick={onToggleVideo}
-              className={`p-4 rounded-2xl glass-panel border border-white/10 transition cursor-pointer ${
-                isVideoMuted ? 'bg-red-500/30 text-red-300' : 'text-white hover:bg-white/10'
+              onClick={() => {
+                HapticsService.light();
+                onToggleVideo();
+              }}
+              className={`p-3.5 rounded-full glass border border-white/10 transition cursor-pointer active:scale-90 ${
+                isVideoMuted ? 'bg-red-500/30 text-red-300 border-red-500/40' : 'text-white hover:bg-white/10'
               }`}
-              title={isVideoMuted ? 'Turn Camera On' : 'Turn Camera Off'}
+              title={isVideoMuted ? 'Turn camera on' : 'Turn camera off'}
             >
-              {isVideoMuted ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+              {isVideoMuted ? <VideoOff className="w-5 h-5" /> : <Video className="w-5 h-5" />}
             </button>
           )}
 
           <button
-            onClick={onEndCall}
-            className="px-8 py-4 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-medium flex items-center gap-2 shadow-lg shadow-red-600/40 hover:brightness-110 active:scale-95 transition cursor-pointer"
+            onClick={() => {
+              HapticsService.heavy();
+              SoundEffectsService.playDelete();
+              onEndCall();
+            }}
+            className="p-4 rounded-full bg-red-600 text-white shadow-glow hover:bg-red-700 active:scale-90 transition cursor-pointer"
+            title="End Call"
           >
             <PhoneOff className="w-6 h-6" />
-            <span>End Call</span>
           </button>
         </div>
 

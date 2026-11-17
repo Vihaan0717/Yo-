@@ -2880,6 +2880,15 @@ export function YoApp() {
   // WebRTC Calling state
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
   const [callingChat, setCallingChat] = useState<Profile | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{
+    sessionId: string;
+    conversationId: string;
+    callerId: string;
+    callerName: string;
+    callerAvatar?: string;
+    callerHandle?: string;
+    callType: 'audio' | 'video';
+  } | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
@@ -3224,6 +3233,28 @@ export function YoApp() {
           refreshConversations();
         }
       })
+      .on('broadcast', { event: 'incoming_call' }, (payload: any) => {
+        const callData = payload.payload;
+        // Verify call is directed to current user or one of user's conversations
+        if (callData && callData.callerId !== user?.id && (!callData.targetUserId || callData.targetUserId === user?.id)) {
+          setIncomingCall({
+            sessionId: callData.sessionId,
+            conversationId: callData.conversationId,
+            callerId: callData.callerId,
+            callerName: callData.callerName || 'Unknown Caller',
+            callerAvatar: callData.callerAvatar,
+            callerHandle: callData.callerHandle,
+            callType: callData.callType || 'audio'
+          });
+          SoundEffectsService.playRingtoneBurst();
+        }
+      })
+      .on('broadcast', { event: 'call_ended' }, (payload: any) => {
+        const data = payload.payload;
+        if (data && (data.sessionId === activeCall?.id || data.sessionId === incomingCall?.sessionId)) {
+          endCall();
+        }
+      })
       .subscribe();
 
     return () => {
@@ -3266,20 +3297,84 @@ export function YoApp() {
   };
 
   const startCall = async (type: "audio" | "video", chat: Chat) => {
+    const sessionId = `call-${Date.now()}`;
     const session: CallSession = {
-      id: `call-${Date.now()}`,
+      id: sessionId,
       conversation_id: chat.id,
       initiator_id: user?.id || "me",
       call_type: type,
-      status: "accepted",
+      status: "ringing",
       started_at: new Date().toISOString()
     };
 
     const peerProfile: Profile = {
       id: chat.target_user_id || chat.id,
-      username: chat.handle.replace("@", ""),
+      username: (chat.handle || "").replace("@", ""),
       display_name: chat.name,
-      avatar_url: "",
+      avatar_url: chat.avatar_url || "",
+      is_discoverable: true,
+      created_at: new Date().toISOString()
+    };
+    setCallingChat(peerProfile);
+
+    // Broadcast incoming_call signal over Supabase realtime to alert peer
+    try {
+      const channel = supabase.channel('global_messages_listener');
+      channel.send({
+        type: 'broadcast',
+        event: 'incoming_call',
+        payload: {
+          sessionId,
+          conversationId: chat.id,
+          callerId: user?.id || 'me',
+          callerName: user?.display_name || user?.username || 'Yo User',
+          callerAvatar: user?.avatar_url || '',
+          callerHandle: user?.username || '',
+          targetUserId: chat.target_user_id,
+          callType: type
+        }
+      });
+    } catch (err) {
+      console.warn("Failed to broadcast call signal:", err);
+    }
+
+    const webrtc = new WebRTCService();
+    setWebrtcService(webrtc);
+
+    try {
+      const stream = await webrtc.startLocalMedia(type);
+      setLocalStream(stream);
+
+      webrtc.createPeerConnection(
+        (cand) => console.log("ICE candidate:", cand),
+        (rStream) => {
+          setRemoteStream(rStream);
+          setActiveCall((prev) => (prev ? { ...prev, status: "accepted" } : prev));
+        }
+      );
+    } catch (e) {
+      console.warn("Media stream init fallback:", e);
+    }
+
+    setActiveCall(session);
+  };
+
+  const answerIncomingCall = async () => {
+    if (!incomingCall) return;
+    const session: CallSession = {
+      id: incomingCall.sessionId,
+      conversation_id: incomingCall.conversationId,
+      initiator_id: incomingCall.callerId,
+      call_type: incomingCall.callType,
+      status: "accepted",
+      started_at: new Date().toISOString()
+    };
+
+    const peerProfile: Profile = {
+      id: incomingCall.callerId,
+      username: incomingCall.callerHandle || "caller",
+      display_name: incomingCall.callerName,
+      avatar_url: incomingCall.callerAvatar || "",
       is_discoverable: true,
       created_at: new Date().toISOString()
     };
@@ -3289,7 +3384,7 @@ export function YoApp() {
     setWebrtcService(webrtc);
 
     try {
-      const stream = await webrtc.startLocalMedia(type);
+      const stream = await webrtc.startLocalMedia(incomingCall.callType);
       setLocalStream(stream);
 
       webrtc.createPeerConnection(
@@ -3301,9 +3396,34 @@ export function YoApp() {
     }
 
     setActiveCall(session);
+    setIncomingCall(null);
+  };
+
+  const declineIncomingCall = () => {
+    if (incomingCall) {
+      try {
+        const channel = supabase.channel('global_messages_listener');
+        channel.send({
+          type: 'broadcast',
+          event: 'call_ended',
+          payload: { sessionId: incomingCall.sessionId }
+        });
+      } catch (err) {}
+    }
+    setIncomingCall(null);
   };
 
   const endCall = () => {
+    if (activeCall) {
+      try {
+        const channel = supabase.channel('global_messages_listener');
+        channel.send({
+          type: 'broadcast',
+          event: 'call_ended',
+          payload: { sessionId: activeCall.id }
+        });
+      } catch (err) {}
+    }
     if (webrtcService) {
       webrtcService.stopAll();
       setWebrtcService(null);
@@ -3312,6 +3432,7 @@ export function YoApp() {
     setRemoteStream(null);
     setActiveCall(null);
     setCallingChat(null);
+    setIncomingCall(null);
   };
 
   return (
@@ -3450,6 +3571,60 @@ export function YoApp() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Incoming Call Dialog / Notification Banner */}
+      {incomingCall && !activeCall && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-[32px] glass-strong border border-white/15 p-6 shadow-2xl flex flex-col items-center text-center bg-[#0d1322]">
+            <div className="relative mb-4">
+              <Avatar
+                chat={{
+                  name: incomingCall.callerName,
+                  avatar_url: incomingCall.callerAvatar,
+                  hue: incomingCall.callerHandle ? (incomingCall.callerHandle.charCodeAt(0) * 37) % 360 : 200
+                }}
+                size={80}
+              />
+              <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500"></span>
+              </span>
+            </div>
+
+            <h3 className="text-xl font-bold text-white mb-1">{incomingCall.callerName}</h3>
+            <p className="text-xs text-primary font-medium mb-1">
+              Incoming {incomingCall.callType === 'video' ? 'Video' : 'Voice'} Call...
+            </p>
+            <p className="text-[11px] text-slate-400 mb-6">Realtime WebRTC Audio & Video</p>
+
+            <div className="flex items-center gap-6 w-full justify-center">
+              <button
+                onClick={() => {
+                  HapticsService.medium();
+                  SoundEffectsService.playDelete();
+                  declineIncomingCall();
+                }}
+                className="flex-1 py-3.5 px-4 rounded-2xl bg-red-600/90 hover:bg-red-600 text-white font-semibold text-sm flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-lg"
+              >
+                <Phone className="w-4 h-4 rotate-[135deg]" />
+                <span>Decline</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  HapticsService.heavy();
+                  SoundEffectsService.playTap();
+                  answerIncomingCall();
+                }}
+                className="flex-1 py-3.5 px-4 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-sm flex items-center justify-center gap-2 transition cursor-pointer active:scale-95 shadow-glow"
+              >
+                <Phone className="w-4 h-4" />
+                <span>Accept</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* WebRTC Video / Audio HUD overlay */}
       {activeCall && (
