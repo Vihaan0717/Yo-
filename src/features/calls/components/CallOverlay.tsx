@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 import type { CallSession, Profile } from '../../../types';
 import { Avatar } from '../../../components/yo/Avatar';
@@ -30,8 +30,10 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
 }) => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const [callDuration, setCallDuration] = useState(0);
 
-  // Play outgoing ringtone while waiting for peer / connecting
+  // Play outgoing ringtone while waiting for peer / ringing
   useEffect(() => {
     let interval: any = null;
     if (session.status === 'ringing') {
@@ -46,6 +48,25 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     };
   }, [session.status]);
 
+  // Duration timer once connected
+  useEffect(() => {
+    let timer: any = null;
+    if (session.status === 'accepted') {
+      timer = setInterval(() => {
+        setCallDuration((d) => d + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [session.status]);
+
+  const formatDuration = (secs: number) => {
+    const mins = Math.floor(secs / 60);
+    const rem = secs % 60;
+    return `${mins.toString().padStart(2, '0')}:${rem.toString().padStart(2, '0')}`;
+  };
+
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
@@ -56,10 +77,17 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(() => {});
+    }
   }, [remoteStream]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-2xl p-3 sm:p-6">
+      {/* Hidden audio element dedicated to playing peer remote audio stream */}
+      <audio ref={remoteAudioRef} autoPlay playsInline />
+
       <div className="relative w-full max-w-md h-[92vh] sm:h-[85vh] rounded-[36px] overflow-hidden glass-strong border border-white/10 flex flex-col justify-between shadow-2xl bg-[#0b0f19]">
         
         {/* Call Header */}
@@ -77,7 +105,11 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
               <h3 className="font-bold text-base text-white">{otherUser?.display_name || 'Yo Peer'}</h3>
               <p className="text-xs text-primary flex items-center gap-1.5 mt-0.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
-                <span>{session.status === 'ringing' ? 'Ringing...' : 'Connected (E2EE WebRTC)'}</span>
+                <span>
+                  {session.status === 'ringing' 
+                    ? 'Ringing...' 
+                    : `Live (${formatDuration(callDuration)})`}
+                </span>
               </p>
             </div>
           </div>
@@ -91,7 +123,7 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
         <div className="relative flex-1 flex items-center justify-center overflow-hidden">
           {session.call_type === 'video' ? (
             <>
-              {/* Remote Video */}
+              {/* Remote Video Stream */}
               <div className="absolute inset-0 bg-slate-950 flex items-center justify-center">
                 {remoteStream ? (
                   <video
@@ -111,9 +143,9 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
                       size={96} 
                     />
                     <p className="text-white font-semibold text-sm mt-4">
-                      {session.status === 'ringing' ? 'Calling...' : 'Waiting for video stream...'}
+                      {session.status === 'ringing' ? 'Calling...' : 'Connecting P2P video stream...'}
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-1">Google STUN P2P active</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Google STUN Encrypted Channel</p>
                   </div>
                 )}
               </div>
@@ -153,7 +185,9 @@ export const CallOverlay: React.FC<CallOverlayProps> = ({
               <p className="text-slate-400 text-xs">@{otherUser?.username || 'contact'}</p>
               
               <div className="text-xs text-primary font-medium mt-3">
-                {session.status === 'ringing' ? 'Ringing cellular audio...' : '00:14 · High-Fidelity Audio'}
+                {session.status === 'ringing' 
+                  ? 'Calling...' 
+                  : `${formatDuration(callDuration)} · High-Fidelity WebRTC Audio`}
               </div>
 
               {/* Audio visualizer wave */}

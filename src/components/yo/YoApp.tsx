@@ -2931,6 +2931,12 @@ export function YoApp() {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [webrtcService, setWebrtcService] = useState<WebRTCService | null>(null);
+  const webrtcRef = useRef<WebRTCService | null>(null);
+  webrtcRef.current = webrtcService;
+  const activeCallRef = useRef<CallSession | null>(null);
+  activeCallRef.current = activeCall;
+  const incomingCallRef = useRef<typeof incomingCall>(null);
+  incomingCallRef.current = incomingCall;
 
   // Load real conversations from Supabase
   const refreshConversations = async () => {
@@ -3310,9 +3316,50 @@ export function YoApp() {
           SoundEffectsService.playRingtoneBurst();
         }
       })
+      .on('broadcast', { event: 'call_offer' }, async (payload: any) => {
+        const data = payload.payload;
+        if (!data || data.callerId === user?.id) return;
+        if (data.targetUserId && data.targetUserId !== user?.id) return;
+
+        // If callee already initialized WebRTC and is answering, set remote offer
+        if (webrtcRef.current && data.offer) {
+          const answer = await webrtcRef.current.createAnswer(data.offer);
+          if (answer) {
+            globalChannel.send({
+              type: 'broadcast',
+              event: 'call_answer',
+              payload: {
+                sessionId: data.sessionId,
+                answer,
+                calleeId: user?.id
+              }
+            });
+          }
+        } else {
+          // Store pending offer on incoming call
+          (window as any).__pending_call_offer = data.offer;
+        }
+      })
+      .on('broadcast', { event: 'call_answer' }, async (payload: any) => {
+        const data = payload.payload;
+        if (!data || data.calleeId === user?.id) return;
+        if (activeCallRef.current && activeCallRef.current.id === data.sessionId) {
+          if (webrtcRef.current && data.answer) {
+            await webrtcRef.current.setRemoteAnswer(data.answer);
+            setActiveCall((prev) => (prev ? { ...prev, status: 'accepted' } : prev));
+          }
+        }
+      })
+      .on('broadcast', { event: 'ice_candidate' }, async (payload: any) => {
+        const data = payload.payload;
+        if (!data || data.senderId === user?.id) return;
+        if (webrtcRef.current && data.candidate) {
+          await webrtcRef.current.addIceCandidate(data.candidate);
+        }
+      })
       .on('broadcast', { event: 'call_ended' }, (payload: any) => {
         const data = payload.payload;
-        if (data && (data.sessionId === activeCall?.id || data.sessionId === incomingCall?.sessionId)) {
+        if (data && (data.sessionId === activeCallRef.current?.id || data.sessionId === incomingCallRef.current?.sessionId)) {
           endCall();
         }
       })
@@ -3378,10 +3425,39 @@ export function YoApp() {
       created_at: new Date().toISOString()
     };
     setCallingChat(peerProfile);
+    setActiveCall(session);
 
-    // Broadcast incoming_call signal over Supabase realtime to alert peer
+    const webrtc = new WebRTCService();
+    setWebrtcService(webrtc);
+
     try {
+      const stream = await webrtc.startLocalMedia(type);
+      setLocalStream(stream);
+
       const channel = supabase.channel('global_messages_listener');
+
+      webrtc.createPeerConnection(
+        (cand) => {
+          channel.send({
+            type: 'broadcast',
+            event: 'ice_candidate',
+            payload: {
+              sessionId,
+              candidate: cand,
+              senderId: user?.id
+            }
+          });
+        },
+        (rStream) => {
+          setRemoteStream(rStream);
+          setActiveCall((prev) => (prev ? { ...prev, status: "accepted" } : prev));
+        }
+      );
+
+      // Create local SDP offer
+      const offer = await webrtc.createOffer();
+
+      // Broadcast incoming_call + SDP offer over Supabase realtime to alert peer
       channel.send({
         type: 'broadcast',
         event: 'incoming_call',
@@ -3393,32 +3469,23 @@ export function YoApp() {
           callerAvatar: user?.avatar_url || '',
           callerHandle: user?.username || '',
           targetUserId: chat.target_user_id,
-          callType: type
+          callType: type,
+          offer
         }
       });
-    } catch (err) {
-      console.warn("Failed to broadcast call signal:", err);
-    }
-
-    const webrtc = new WebRTCService();
-    setWebrtcService(webrtc);
-
-    try {
-      const stream = await webrtc.startLocalMedia(type);
-      setLocalStream(stream);
-
-      webrtc.createPeerConnection(
-        (cand) => console.log("ICE candidate:", cand),
-        (rStream) => {
-          setRemoteStream(rStream);
-          setActiveCall((prev) => (prev ? { ...prev, status: "accepted" } : prev));
+      channel.send({
+        type: 'broadcast',
+        event: 'call_offer',
+        payload: {
+          sessionId,
+          callerId: user?.id || 'me',
+          targetUserId: chat.target_user_id,
+          offer
         }
-      );
+      });
     } catch (e) {
-      console.warn("Media stream init fallback:", e);
+      console.warn("Media stream init error:", e);
     }
-
-    setActiveCall(session);
   };
 
   const answerIncomingCall = async () => {
@@ -3449,12 +3516,43 @@ export function YoApp() {
       const stream = await webrtc.startLocalMedia(incomingCall.callType);
       setLocalStream(stream);
 
+      const channel = supabase.channel('global_messages_listener');
+
       webrtc.createPeerConnection(
-        (cand) => console.log("ICE candidate:", cand),
-        (rStream) => setRemoteStream(rStream)
+        (cand) => {
+          channel.send({
+            type: 'broadcast',
+            event: 'ice_candidate',
+            payload: {
+              sessionId: incomingCall.sessionId,
+              candidate: cand,
+              senderId: user?.id
+            }
+          });
+        },
+        (rStream) => {
+          setRemoteStream(rStream);
+        }
       );
+
+      const pendingOffer = (window as any).__pending_call_offer;
+      if (pendingOffer) {
+        const answer = await webrtc.createAnswer(pendingOffer);
+        if (answer) {
+          channel.send({
+            type: 'broadcast',
+            event: 'call_answer',
+            payload: {
+              sessionId: incomingCall.sessionId,
+              answer,
+              calleeId: user?.id
+            }
+          });
+        }
+        (window as any).__pending_call_offer = null;
+      }
     } catch (e) {
-      console.warn("Media stream init fallback:", e);
+      console.warn("Media stream answer init error:", e);
     }
 
     setActiveCall(session);
@@ -3709,8 +3807,16 @@ export function YoApp() {
           onEndCall={endCall}
           isAudioMuted={isAudioMuted}
           isVideoMuted={isVideoMuted}
-          onToggleAudio={() => setIsAudioMuted(!isAudioMuted)}
-          onToggleVideo={() => setIsVideoMuted(!isVideoMuted)}
+          onToggleAudio={() => {
+            const next = !isAudioMuted;
+            setIsAudioMuted(next);
+            webrtcService?.toggleAudio(!next);
+          }}
+          onToggleVideo={() => {
+            const next = !isVideoMuted;
+            setIsVideoMuted(next);
+            webrtcService?.toggleVideo(!next);
+          }}
           localStream={localStream}
           remoteStream={remoteStream}
         />
