@@ -3184,20 +3184,40 @@ export function YoApp() {
             }
           }
 
-          setChatsList((prev) => 
-            prev.map((c) => {
-              if (c.id === targetConvId || (!msg.conversation_id && c.id === 'shared-direct-room')) {
-                return {
-                  ...c,
-                  last: preview,
-                  time: timeStr,
-                  unread: isCurrentlyReading ? 0 : (c.unread || 0) + 1,
-                  typing: false
-                };
-              }
-              return c;
-            })
-          );
+          setChatsList((prev) => {
+            const exists = prev.some((c) => c.id === targetConvId || (!msg.conversation_id && c.id === 'shared-direct-room'));
+            if (exists) {
+              return prev.map((c) => {
+                if (c.id === targetConvId || (!msg.conversation_id && c.id === 'shared-direct-room')) {
+                  return {
+                    ...c,
+                    last: preview,
+                    time: timeStr,
+                    unread: isCurrentlyReading ? 0 : (c.unread || 0) + 1,
+                    typing: false
+                  };
+                }
+                return c;
+              });
+            }
+
+            // If new conversation from an unknown sender, insert at top immediately!
+            const newSenderName = msg.sender_name || 'Someone';
+            const hue = (newSenderName.charCodeAt(0) * 37) % 360;
+            const newChat: Chat = {
+              id: targetConvId,
+              name: newSenderName,
+              handle: `@${newSenderName.toLowerCase().replace(/\s+/g, '')}`,
+              hue,
+              avatar_url: undefined,
+              last: preview,
+              time: timeStr,
+              unread: isCurrentlyReading ? 0 : 1,
+              online: true,
+              target_user_id: msg.sender_id
+            };
+            return [newChat, ...prev];
+          });
         }
       })
       .on('broadcast', { event: 'typing' }, (payload: any) => {
@@ -3276,20 +3296,40 @@ export function YoApp() {
             }
           }
 
-          setChatsList((prev) =>
-            prev.map((c) => {
-              if (c.id === targetConvId) {
-                return {
-                  ...c,
-                  last: preview,
-                  time: timeStr,
-                  unread: isCurrentlyReading ? 0 : (c.unread || 0) + 1,
-                  typing: false
-                };
-              }
-              return c;
-            })
-          );
+          setChatsList((prev) => {
+            const exists = prev.some((c) => c.id === targetConvId);
+            if (exists) {
+              return prev.map((c) => {
+                if (c.id === targetConvId) {
+                  return {
+                    ...c,
+                    last: preview,
+                    time: timeStr,
+                    unread: isCurrentlyReading ? 0 : (c.unread || 0) + 1,
+                    typing: false
+                  };
+                }
+                return c;
+              });
+            }
+
+            // New conversation from database: prepend immediately!
+            const newSenderName = newMsg.sender_name || 'Someone';
+            const hue = (newSenderName.charCodeAt(0) * 37) % 360;
+            const newChat: Chat = {
+              id: targetConvId,
+              name: newSenderName,
+              handle: `@${newSenderName.toLowerCase().replace(/\s+/g, '')}`,
+              hue,
+              avatar_url: undefined,
+              last: preview,
+              time: timeStr,
+              unread: isCurrentlyReading ? 0 : 1,
+              online: true,
+              target_user_id: newMsg.sender_id
+            };
+            return [newChat, ...prev];
+          });
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
@@ -3958,11 +3998,24 @@ export function YoApp() {
             {/* WhatsApp Bottom Quick-Action Toolbar */}
             <div className="w-full p-3 flex items-center justify-around bg-black/50 border-t border-white/10">
               <button
-                onClick={() => {
+                onClick={async () => {
                   const target = avatarPreviewChat;
                   setAvatarPreviewChat(null);
-                  openRef.current = target;
-                  setOpen(target);
+                  if (!target) return;
+
+                  if (target.target_user_id) {
+                    await startDirectChat({
+                      id: target.target_user_id,
+                      username: (target.handle || "").replace("@", "") || "user",
+                      display_name: target.name || "User",
+                      avatar_url: target.avatar_url || "",
+                      is_discoverable: true,
+                      created_at: new Date().toISOString()
+                    });
+                  } else {
+                    openRef.current = target;
+                    setOpen(target);
+                  }
                 }}
                 className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
                 title="Message"
@@ -3971,9 +4024,10 @@ export function YoApp() {
               </button>
 
               <button
-                onClick={() => {
+                onClick={async () => {
                   const target = avatarPreviewChat;
                   setAvatarPreviewChat(null);
+                  if (!target) return;
                   startCall("audio", target);
                 }}
                 className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
@@ -3983,9 +4037,10 @@ export function YoApp() {
               </button>
 
               <button
-                onClick={() => {
+                onClick={async () => {
                   const target = avatarPreviewChat;
                   setAvatarPreviewChat(null);
+                  if (!target) return;
                   startCall("video", target);
                 }}
                 className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
@@ -3995,11 +4050,24 @@ export function YoApp() {
               </button>
 
               <button
-                onClick={() => {
+                onClick={async () => {
                   const target = avatarPreviewChat;
                   setAvatarPreviewChat(null);
-                  openRef.current = target;
-                  setOpen(target);
+                  if (!target) return;
+
+                  if (target.target_user_id) {
+                    await startDirectChat({
+                      id: target.target_user_id,
+                      username: (target.handle || "").replace("@", "") || "user",
+                      display_name: target.name || "User",
+                      avatar_url: target.avatar_url || "",
+                      is_discoverable: true,
+                      created_at: new Date().toISOString()
+                    });
+                  } else {
+                    openRef.current = target;
+                    setOpen(target);
+                  }
                 }}
                 className="p-2.5 rounded-full glass hover:bg-white/15 text-primary cursor-pointer active:scale-90 transition-transform flex flex-col items-center gap-1"
                 title="View Info"
