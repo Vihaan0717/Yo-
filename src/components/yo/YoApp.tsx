@@ -3723,6 +3723,9 @@ export function YoApp() {
             setViewerStoryModalOpen(false);
             refreshStatuses();
           }}
+          onStatusDeleted={() => {
+            refreshStatuses();
+          }}
           onReplyToStatus={(storyAuthorId, _storySnippet, _replyText) => {
             const existing = chatsList.find((c) => c.target_user_id === storyAuthorId || c.id === storyAuthorId);
             if (existing) {

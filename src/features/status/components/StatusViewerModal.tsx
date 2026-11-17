@@ -6,7 +6,10 @@ import {
   ChevronRight, 
   Eye, 
   Heart, 
-  Send
+  Send,
+  Trash2,
+  MoreVertical,
+  Volume2
 } from 'lucide-react';
 import { StatusService } from '../services/StatusService';
 import type { UserStatusGroup, StatusItem, StatusViewer } from '../types/status';
@@ -17,6 +20,7 @@ interface StatusViewerModalProps {
   currentUserId?: string;
   onClose: () => void;
   onReplyToStatus?: (authorId: string, statusSnippet: string, replyText: string) => void;
+  onStatusDeleted?: () => void;
 }
 
 export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
@@ -24,7 +28,8 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   initialGroupIndex,
   currentUserId,
   onClose,
-  onReplyToStatus
+  onReplyToStatus,
+  onStatusDeleted
 }) => {
   const [groupIndex, setGroupIndex] = useState(initialGroupIndex);
   const [statusIndex, setStatusIndex] = useState(0);
@@ -35,6 +40,7 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
   const [replyText, setReplyText] = useState('');
   const [isLiked, setIsLiked] = useState(false);
   const [showHeartPop, setShowHeartPop] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const timerRef = useRef<any>(null);
 
   const currentGroup = groups[groupIndex];
@@ -124,6 +130,15 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
     onClose();
   };
 
+  const handleDeleteCurrentStatus = async () => {
+    if (!currentStatus || !currentUserId || !isOwnStatus) return;
+    if (confirm("Delete this status update? It will be removed for everyone.")) {
+      await StatusService.deleteStatus(currentStatus.id, currentUserId);
+      onStatusDeleted?.();
+      onClose();
+    }
+  };
+
   if (!currentGroup || !currentStatus) return null;
 
   return (
@@ -171,15 +186,48 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            className="p-2 rounded-full bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {isOwnStatus && (
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpen(!menuOpen);
+                  }}
+                  className="p-2 rounded-full bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition cursor-pointer"
+                  title="Status options"
+                >
+                  <MoreVertical className="w-5 h-5" />
+                </button>
+
+                {menuOpen && (
+                  <div className="absolute right-0 top-11 z-50 w-36 rounded-2xl glass-strong border border-white/20 p-1.5 shadow-2xl bg-[#0f172a]">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMenuOpen(false);
+                        handleDeleteCurrentStatus();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-red-400 hover:bg-red-500/20 text-xs font-semibold transition cursor-pointer"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Delete status</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="p-2 rounded-full bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Middle Status Content */}
@@ -198,6 +246,14 @@ export const StatusViewerModal: React.FC<StatusViewerModalProps> = ({
               muted
               className="w-full h-full object-cover"
             />
+          ) : currentStatus.content_type === 'audio' ? (
+            <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-gradient-to-br from-rose-950 via-slate-900 to-zinc-950">
+              <div className="w-24 h-24 rounded-full bg-rose-500/20 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 mb-6 shadow-glow">
+                <Volume2 className="w-12 h-12 animate-pulse text-rose-400" />
+              </div>
+              <p className="text-lg font-bold text-white mb-2">Voice Status</p>
+              <audio src={currentStatus.media_path} autoPlay controls className="w-64 max-w-full mt-2" />
+            </div>
           ) : (
             <img
               src={currentStatus.media_path}

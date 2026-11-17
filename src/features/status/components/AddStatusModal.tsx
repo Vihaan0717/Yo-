@@ -171,27 +171,27 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/85 backdrop-blur-md select-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md select-none">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="relative w-full max-w-md h-[600px] rounded-3xl glass-strong border border-white/20 overflow-hidden flex flex-col justify-between shadow-2xl"
+        className="relative w-full max-w-sm h-[82vh] max-h-[620px] rounded-[32px] glass-strong border border-white/20 overflow-hidden flex flex-col justify-between shadow-2xl bg-[#0b0f19]"
       >
         <input type="file" ref={photoInputRef} accept="image/*" className="hidden" onChange={handlePhotoSelect} />
         <input type="file" ref={videoInputRef} accept="video/*" className="hidden" onChange={handleVideoSelect} />
 
         {/* Top Header */}
-        <div className="relative z-20 flex items-center justify-between p-4 pb-2 border-b border-white/10 text-white">
+        <div className="relative z-20 flex items-center justify-between px-4 py-3 border-b border-white/10 text-white shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm font-bold">New Status Update</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Status</span>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setPrivacyModalOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full glass hover:bg-white/15 text-white/80 text-[11px] font-semibold border border-white/20 cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full glass hover:bg-white/15 text-white/80 text-[10px] font-semibold border border-white/20 cursor-pointer"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-primary" />
               <span>{getAudienceLabel()}</span>
@@ -203,7 +203,7 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
         </div>
 
         {/* Main Canvas Area */}
-        <div className="relative flex-1 flex items-center justify-center overflow-hidden m-3 rounded-2xl border border-white/10">
+        <div className="relative flex-1 flex items-center justify-center overflow-hidden mx-3 my-2 rounded-2xl border border-white/10">
           {mode === 'text' ? (
             <div className={`w-full h-full flex flex-col items-center justify-center p-6 bg-gradient-to-br ${GRADIENTS[gradientIndex]} transition-colors duration-300`}>
               <textarea
@@ -211,34 +211,34 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
                 onChange={(e) => setTextContent(e.target.value)}
                 placeholder="Type your status..."
                 maxLength={200}
-                className="w-full bg-transparent text-white text-center text-lg md:text-xl font-bold placeholder:text-white/60 outline-none resize-none"
+                className="w-full bg-transparent text-white text-center text-lg font-bold placeholder:text-white/60 outline-none resize-none"
                 rows={4}
               />
               <span className="text-[10px] text-white/60 mt-2">{textContent.length} / 200</span>
             </div>
           ) : mode === 'audio' ? (
             <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-gradient-to-br from-rose-950/80 via-slate-900 to-zinc-950">
-              <div className="w-20 h-20 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-4 shadow-glow">
-                <Mic className={`w-8 h-8 ${isRecording ? 'animate-pulse text-rose-500' : ''}`} />
+              <div className="w-16 h-16 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-3 shadow-glow">
+                <Mic className={`w-7 h-7 ${isRecording ? 'animate-pulse text-rose-500' : ''}`} />
               </div>
-              <p className="text-sm font-bold text-white mb-1">
+              <p className="text-xs font-bold text-white mb-1">
                 {isRecording ? `Recording voice status... ${recordSeconds}s` : (audioBlobUrl ? 'Voice note ready!' : 'Record Voice Status')}
               </p>
-              <p className="text-xs text-white/50 mb-4">Up to 60 seconds of crystal-clear voice</p>
+              <p className="text-[10px] text-white/50 mb-3">Up to 60 seconds</p>
 
               {!isRecording && !audioBlobUrl ? (
                 <button
                   onClick={startVoiceRecording}
-                  className="px-5 py-2.5 rounded-full bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs shadow-lg transition cursor-pointer"
+                  className="px-4 py-2 rounded-full bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs shadow-lg transition cursor-pointer"
                 >
                   Start Recording
                 </button>
               ) : isRecording ? (
                 <button
                   onClick={stopVoiceRecording}
-                  className="px-5 py-2.5 rounded-full bg-white text-black font-semibold text-xs shadow-lg flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2 rounded-full bg-white text-black font-semibold text-xs shadow-lg flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Square className="w-3.5 h-3.5 fill-black" />
+                  <Square className="w-3 h-3 fill-black" />
                   <span>Done</span>
                 </button>
               ) : (
@@ -247,7 +247,7 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
                     setAudioBlobUrl(null);
                     startVoiceRecording();
                   }}
-                  className="px-4 py-1.5 rounded-xl glass hover:bg-white/10 text-white text-xs cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl glass hover:bg-white/10 text-white text-xs cursor-pointer"
                 >
                   Re-record
                 </button>
@@ -277,25 +277,25 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
         </div>
 
         {/* Bottom Toolbar & Publish */}
-        <div className="relative z-20 p-3 pt-1 border-t border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pr-2">
+        <div className="relative z-20 px-3 py-2.5 border-t border-white/10 flex items-center justify-between gap-2 shrink-0 bg-black/40">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
             <button
               onClick={() => {
                 setMode('text');
                 setMediaDataUrl(null);
               }}
-              className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+              className={`p-1.5 px-2.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer shrink-0 ${
                 mode === 'text' ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/70'
               }`}
             >
-              <Type className="w-4 h-4" />
+              <Type className="w-3.5 h-3.5" />
               <span>Text</span>
             </button>
 
             {mode === 'text' && (
               <button
                 onClick={() => setGradientIndex((prev) => (prev + 1) % GRADIENTS.length)}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition cursor-pointer shrink-0"
+                className="p-1.5 px-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold transition cursor-pointer shrink-0"
               >
                 🎨 Color
               </button>
@@ -303,21 +303,21 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
 
             <button
               onClick={() => photoInputRef.current?.click()}
-              className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+              className={`p-1.5 px-2.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer shrink-0 ${
                 mode === 'image' ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/70'
               }`}
             >
-              <ImageIcon className="w-4 h-4" />
+              <ImageIcon className="w-3.5 h-3.5" />
               <span>Photo</span>
             </button>
 
             <button
               onClick={() => videoInputRef.current?.click()}
-              className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+              className={`p-1.5 px-2.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer shrink-0 ${
                 mode === 'video' ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/70'
               }`}
             >
-              <Film className="w-4 h-4" />
+              <Film className="w-3.5 h-3.5" />
               <span>Video</span>
             </button>
 
@@ -326,11 +326,11 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
                 setMode('audio');
                 setMediaDataUrl(null);
               }}
-              className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+              className={`p-1.5 px-2.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer shrink-0 ${
                 mode === 'audio' ? 'bg-primary/20 border-primary text-primary' : 'bg-white/5 border-white/10 text-white/70'
               }`}
             >
-              <Mic className="w-4 h-4" />
+              <Mic className="w-3.5 h-3.5" />
               <span>Voice</span>
             </button>
           </div>
@@ -343,10 +343,10 @@ export const AddStatusModal: React.FC<AddStatusModalProps> = ({
               ((mode === 'image' || mode === 'video') && !mediaDataUrl) ||
               (mode === 'audio' && !audioBlobUrl)
             }
-            className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-brand text-primary-foreground font-semibold text-xs shadow-glow disabled:opacity-40 cursor-pointer transition shrink-0"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-2xl bg-brand text-primary-foreground font-semibold text-xs shadow-glow disabled:opacity-40 cursor-pointer transition shrink-0 ml-1"
           >
             {isSubmitting ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : (
               <>
                 <Send className="w-3.5 h-3.5" />

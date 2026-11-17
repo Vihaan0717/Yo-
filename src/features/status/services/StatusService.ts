@@ -445,6 +445,26 @@ export class StatusService {
     return isNowMuted;
   }
 
+  /**
+   * Delete a specific status update
+   */
+  static async deleteStatus(statusId: string, userId: string): Promise<boolean> {
+    try {
+      await supabase
+        .from('statuses')
+        .delete()
+        .eq('id', statusId)
+        .eq('owner_id', userId);
+    } catch (e) {
+      console.warn('DB delete status fallback to local:', e);
+    }
+
+    const list = this.getLocalStatuses();
+    const updated = list.filter((x) => x.status.id !== statusId);
+    localStorage.setItem(LOCAL_STATUSES_KEY, JSON.stringify(updated));
+    return true;
+  }
+
   // --- Internal Local Cache Helpers ---
   private static hasViewedLocal(statusId: string, userId?: string): boolean {
     if (!userId) return false;
