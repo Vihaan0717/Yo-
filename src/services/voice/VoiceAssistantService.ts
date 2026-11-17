@@ -7,6 +7,9 @@
  * 3. Granular per-contact and global settings persistence in localStorage.
  */
 
+import { TextToSpeech } from '@capacitor-community/text-to-speech';
+import { Capacitor } from '@capacitor/core';
+
 export type AlertSoundType = 'glass_chime' | 'pulse' | 'bubble' | 'electronic' | 'none';
 
 export interface ChatNotificationConfig {
@@ -231,7 +234,7 @@ export class VoiceAssistantService {
   }
 
   /**
-   * Speak announcement using Web SpeechSynthesis API:
+   * Speak announcement using native Android TextToSpeech or fallback to Web SpeechSynthesis API:
    * "You have a message from [sender] at [time]: [content]"
    */
   static speak(text: string) {
@@ -239,12 +242,33 @@ export class VoiceAssistantService {
     // Always trigger the sound alert tone first
     this.playTone(settings.defaultSound || 'bubble');
 
+    // 1. If running on native platform (Android / iOS), use Native TextToSpeech engine!
+    if (Capacitor.isNativePlatform()) {
+      try {
+        TextToSpeech.stop().catch(() => {});
+        TextToSpeech.speak({
+          text,
+          lang: 'en-US',
+          rate: settings.voiceSpeed || 1.0,
+          pitch: settings.voicePitch || 1.05,
+          volume: 1.0,
+          category: 'ambient'
+        }).catch((err) => {
+          console.warn('Native TextToSpeech speak error:', err);
+        });
+        return;
+      } catch (err) {
+        console.warn('Native TextToSpeech invocation error, falling back to browser API:', err);
+      }
+    }
+
+    // 2. Web browser fallback using window.speechSynthesis
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       return;
     }
 
     try {
-      // Resume context if suspended or paused (essential on Android/Chrome WebView)
+      // Resume context if suspended or paused
       window.speechSynthesis.resume();
       window.speechSynthesis.cancel(); // Stop previous utterance
 
@@ -253,7 +277,7 @@ export class VoiceAssistantService {
       utterance.pitch = settings.voicePitch || 1.05;
       utterance.lang = 'en-US';
 
-      // Keep utterance reference in memory to avoid Android WebView GC bug
+      // Keep utterance reference in memory to avoid GC bug
       (window as any).__yo_last_utterance = utterance;
 
       const doSpeak = () => {
