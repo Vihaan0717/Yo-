@@ -205,8 +205,26 @@ export const AuthModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ 
 
             <button
               type="button"
-              onClick={signInWithGoogle}
-              className="w-full glass py-2.5 rounded-xl text-xs font-semibold text-white flex items-center justify-center gap-2 hover:bg-white/10 transition cursor-pointer border border-white/10"
+              disabled={loading}
+              onClick={async () => {
+                setError(null);
+                setLoading(true);
+                try {
+                  const res = await signInWithGoogle();
+                  if (res?.error) {
+                    setError(
+                      res.error.includes('provider is not enabled') || res.error.includes('OAuth')
+                        ? 'Google Sign-In is not enabled in your Supabase project dashboard. Please sign in with Email & Password.'
+                        : res.error
+                    );
+                  }
+                } catch (err: any) {
+                  setError('Google Sign-In is not configured for this app yet. Please use Email & Password.');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="w-full glass py-2.5 rounded-xl text-xs font-semibold text-white flex items-center justify-center gap-2 hover:bg-white/10 transition cursor-pointer border border-white/10 disabled:opacity-50"
             >
               <svg className="w-4 h-4" viewBox="0 0 24 24">
                 <path

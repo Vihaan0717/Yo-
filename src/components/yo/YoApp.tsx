@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { App as CapacitorApp } from "@capacitor/app";
 import { 
   MessageCircle, 
   Phone, 
@@ -125,7 +126,7 @@ const itemV = { hidden: { opacity: 0, y: 14, scale: 0.98 }, show: { opacity: 1, 
 
 function Header({ title, right }: { title: string; right?: React.ReactNode }) {
   return (
-    <div className="flex items-end justify-between px-5 pb-3 pt-6">
+    <div className="flex items-end justify-between px-5 pb-3 pt-12 sm:pt-6">
       <motion.h1 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={spring} className="text-[34px] font-extrabold tracking-tight">{title}</motion.h1>
       <div className="flex gap-2">{right}</div>
     </div>
@@ -2019,11 +2020,11 @@ function ChatView({
       transition={{ type: "tween", duration: 0.18, ease: "easeInOut" }}
       className="absolute inset-0 z-30 flex flex-col bg-background/60 backdrop-blur-2xl"
     >
-      <div className="glass-strong flex items-center gap-3 rounded-none border-x-0 border-t-0 px-3 py-3">
+      <div className="glass-strong flex items-center gap-2.5 rounded-none border-x-0 border-t-0 px-3 pb-3 pt-12 sm:pt-3">
         <button 
           onClick={onBack} 
           aria-label="Back" 
-          className="flex items-center text-primary cursor-pointer active:scale-90 transition-transform p-1"
+          className="flex items-center justify-center text-primary cursor-pointer active:scale-90 transition-transform p-2 -ml-1 rounded-full hover:bg-secondary/40 shrink-0"
         >
           <ChevronLeft className="h-7 w-7" />
         </button>
@@ -2715,6 +2716,71 @@ export function YoApp() {
     chatsListRef.current = chatsList;
   }, [chatsList]);
 
+  // Android Hardware / Swipe Back Button Integration
+  const tabRef = useRef<Tab>(tab);
+  tabRef.current = tab;
+  const modalsRef = useRef({
+    authOpen,
+    profileModalOpen,
+    themeModalOpen,
+    aboutUsOpen,
+    groupModalOpen,
+    globalNotifModalOpen,
+    createStoryModalOpen,
+    viewerStoryModalOpen,
+    privacyModalOpen
+  });
+  modalsRef.current = {
+    authOpen,
+    profileModalOpen,
+    themeModalOpen,
+    aboutUsOpen,
+    groupModalOpen,
+    globalNotifModalOpen,
+    createStoryModalOpen,
+    viewerStoryModalOpen,
+    privacyModalOpen
+  };
+
+  useEffect(() => {
+    let backHandler: any = null;
+    const registerBackHandler = async () => {
+      try {
+        backHandler = await CapacitorApp.addListener('backButton', () => {
+          const m = modalsRef.current;
+          if (m.authOpen) { setAuthOpen(false); return; }
+          if (m.profileModalOpen) { setProfileModalOpen(false); return; }
+          if (m.themeModalOpen) { setThemeModalOpen(false); return; }
+          if (m.aboutUsOpen) { setAboutUsOpen(false); return; }
+          if (m.groupModalOpen) { setGroupModalOpen(false); return; }
+          if (m.globalNotifModalOpen) { setGlobalNotifModalOpen(false); return; }
+          if (m.createStoryModalOpen) { setCreateStoryModalOpen(false); return; }
+          if (m.viewerStoryModalOpen) { setViewerStoryModalOpen(false); return; }
+          if (m.privacyModalOpen) { setPrivacyModalOpen(false); return; }
+
+          if (openRef.current !== null) {
+            setOpen(null);
+            return;
+          }
+
+          if (tabRef.current !== 'chats') {
+            setTab('chats');
+            return;
+          }
+
+          CapacitorApp.minimizeApp();
+        });
+      } catch (e) {
+        console.warn('Back button listener setup:', e);
+      }
+    };
+
+    registerBackHandler();
+    return () => {
+      backHandler?.remove?.();
+    };
+  }, []);
+
   // Archived, Locked & Favorited Chats State & Persistence
   const [archivedIds, setArchivedIds] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('yo_archived_chats') || '[]'); } catch { return []; }
@@ -2840,29 +2906,66 @@ export function YoApp() {
           if (!conv) continue;
 
           // For groups, handle displays member count and name is group title
-          let name = conv.title || "Yo Direct Chat";
+          let name = conv.title || "Direct Chat";
           let handle = "direct";
           let hue = 180;
           let targetUserId = undefined;
+          let avatarUrl = conv.avatar_url || undefined;
 
           if (conv.type === 'group') {
             name = conv.title || "Group Chat";
             handle = "group";
             hue = (name.charCodeAt(0) * 41) % 360;
           } else {
-            // Fetch other participant profile for direct chat
+            // 1. Fetch other participant user_id from conversation_members
             const { data: otherMember } = await supabase
               .from('conversation_members')
-              .select('user_id, profiles(*)')
+              .select('user_id')
               .eq('conversation_id', conv.id)
               .neq('user_id', user.id)
               .maybeSingle();
 
-            const profile = (otherMember as any)?.profiles;
-            name = profile?.display_name || conv.title || "Yo Direct Chat";
-            handle = profile?.username ? `@${profile.username}` : "direct";
-            hue = handle ? (handle.charCodeAt(1) * 33) % 360 : 180;
-            targetUserId = profile?.id;
+            let profile: Profile | null = null;
+            if (otherMember?.user_id) {
+              const { data: pData } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', otherMember.user_id)
+                .maybeSingle();
+              profile = pData;
+            }
+
+            if (!profile) {
+              // Check recent message sender
+              const { data: recentMsg } = await supabase
+                .from('messages')
+                .select('sender_id')
+                .eq('conversation_id', conv.id)
+                .neq('sender_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+              if (recentMsg?.sender_id) {
+                const { data: pData } = await supabase
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', recentMsg.sender_id)
+                  .maybeSingle();
+                profile = pData;
+              }
+            }
+
+            if (profile) {
+              name = profile.display_name || `@${profile.username}`;
+              handle = `@${profile.username}`;
+              hue = (profile.username.charCodeAt(0) * 33) % 360;
+              targetUserId = profile.id;
+              avatarUrl = profile.avatar_url || undefined;
+            } else {
+              name = conv.title || "Direct Chat";
+              handle = "direct";
+            }
           }
 
           // WhatsApp read watermark logic:
@@ -2903,6 +3006,7 @@ export function YoApp() {
             name,
             handle,
             hue,
+            avatar_url: avatarUrl,
             last: conv.last_message_preview || "Conversation started",
             time: conv.last_message_at ? new Date(conv.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Just now",
             unread: unreadCount,
@@ -3063,6 +3167,12 @@ export function YoApp() {
           const targetConvId = newMsg.conversation_id;
           const isCurrentlyReading = openRef.current?.id === targetConvId;
 
+          // If conversation is brand new and not yet in our chatsList, refresh immediately!
+          const exists = chatsListRef.current.some((c) => c.id === targetConvId);
+          if (!exists) {
+            refreshConversations();
+          }
+
           // Acknowledge delivery to sender when receiver device detects incoming message!
           ReceiptService.acknowledgeDelivery(targetConvId, [newMsg.id]).then();
 
@@ -3108,6 +3218,11 @@ export function YoApp() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
         refreshConversations();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_members' }, (payload: any) => {
+        if (payload.new?.user_id === user?.id || payload.old?.user_id === user?.id) {
+          refreshConversations();
+        }
       })
       .subscribe();
 

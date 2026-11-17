@@ -213,8 +213,16 @@ export class VoiceAssistantService {
    * "You have a message from [sender] at [time]: [content]"
    */
   static speak(text: string) {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      this.playTone('bubble');
+      return;
+    }
+
     try {
+      // Resume context if suspended (essential on Android/Chrome)
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
       window.speechSynthesis.cancel(); // Stop any pending speech
 
       const settings = this.getSettings();
@@ -222,18 +230,35 @@ export class VoiceAssistantService {
       utterance.rate = settings.voiceSpeed || 1.0;
       utterance.pitch = settings.voicePitch || 1.05;
 
-      // Select optimal natural voice (English preferred)
-      const voices = window.speechSynthesis.getVoices();
-      if (voices && voices.length > 0) {
-        const preferred = voices.find(
-          (v) => (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Siri') || v.name.includes('Microsoft')) && v.lang.startsWith('en')
-        ) || voices.find((v) => v.lang.startsWith('en')) || voices[0];
-        if (preferred) utterance.voice = preferred;
-      }
+      const assignVoiceAndSpeak = () => {
+        try {
+          const voices = window.speechSynthesis.getVoices();
+          if (voices && voices.length > 0) {
+            const preferred = voices.find(
+              (v) => (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Siri') || v.name.includes('Microsoft')) && v.lang.startsWith('en')
+            ) || voices.find((v) => v.lang.startsWith('en')) || voices[0];
+            if (preferred) utterance.voice = preferred;
+          }
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn('SpeechSynthesis speak error:', e);
+        }
+      };
 
-      window.speechSynthesis.speak(utterance);
+      const voices = window.speechSynthesis.getVoices();
+      if (!voices || voices.length === 0) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          window.speechSynthesis.onvoiceschanged = null;
+          assignVoiceAndSpeak();
+        };
+        // Fallback speak in case onvoiceschanged does not fire
+        setTimeout(assignVoiceAndSpeak, 150);
+      } else {
+        assignVoiceAndSpeak();
+      }
     } catch (err) {
       console.warn('Speech synthesis error:', err);
+      this.playTone('bubble');
     }
   }
 
