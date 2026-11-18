@@ -142,6 +142,7 @@ export class MessageOutboxService {
           .insert({
             conversation_id: item.conversation_id,
             sender_id: item.sender_id,
+            client_message_id: item.client_message_id,
             content: item.content,
             message_type: item.message_type,
             reply_to: item.reply_to || null
@@ -159,6 +160,8 @@ export class MessageOutboxService {
           id: inserted.id,
           conversation_id: inserted.conversation_id,
           sender_id: inserted.sender_id,
+          sequence_number: Number(inserted.sequence_number) || undefined,
+          client_message_id: inserted.client_message_id,
           message_type: inserted.message_type,
           content: inserted.content,
           reply_to: inserted.reply_to,

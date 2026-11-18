@@ -31,11 +31,12 @@ describe('Messaging Engine Core Logic', () => {
 
   describe('Receipt State Machine Progression', () => {
     const validTransitions: Record<MessageStatus, MessageStatus[]> = {
-      sending: ['sent', 'failed'],
+      sending: ['sent', 'failed', 'retrying'],
+      retrying: ['sent', 'failed'],
       sent: ['delivered', 'read'],
       delivered: ['read'],
       read: [], // Terminal state
-      failed: ['sending'] // Retry
+      failed: ['sending', 'retrying'] // Retry
     };
 
     function canTransition(current: MessageStatus, next: MessageStatus): boolean {

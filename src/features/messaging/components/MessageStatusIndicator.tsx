@@ -24,6 +24,16 @@ export const MessageStatusIndicator: React.FC<MessageStatusIndicatorProps> = ({
         </span>
       );
 
+    case 'retrying':
+      return (
+        <span 
+          title="Reconnecting & retrying send..." 
+          className={`inline-flex items-center text-amber-400/80 animate-spin ${className}`}
+        >
+          <Clock className="w-3 h-3" />
+        </span>
+      );
+
     case 'sent':
       return (
         <span 

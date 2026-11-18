@@ -1,0 +1,69 @@
+Feature Name,Category,Screen / Component,Source Files,Database Dependencies,Status,Verification Evidence
+Email/Password Signup,Authentication,AuthModal,src/components/modals/AuthModal.tsx,auth.users -> public.profiles,IMPLEMENTED AND VERIFIED,AuthModal.tsx lines 45-80
+Email/Password Login,Authentication,AuthModal,src/components/modals/AuthModal.tsx,auth.users,IMPLEMENTED AND VERIFIED,AuthModal.tsx lines 82-115
+Email Verification,Authentication,AuthModal,src/components/modals/AuthModal.tsx,auth.users,IMPLEMENTED AND VERIFIED,Banner displays on unverified state
+Google OAuth,Authentication,AuthModal,src/components/modals/AuthModal.tsx,Supabase OAuth,IMPLEMENTED BUT NOT VERIFIED,Code present; needs Google Cloud Client ID
+Password Reset,Authentication,AuthModal,src/components/modals/AuthModal.tsx,auth.users,IMPLEMENTED AND VERIFIED,Dispatches reset email via Supabase Auth
+Profile Creation,Authentication,OnboardingView,src/components/yo/OnboardingView.tsx,public.profiles,IMPLEMENTED AND VERIFIED,Inserts display name and handle
+Username Availability,Authentication,UsernameInput,src/services/auth/IdentityService.ts,RPC check_username_availability,IMPLEMENTED AND VERIFIED,Passed 7/7 automated unit tests
+Username Normalization,Authentication,IdentityService,src/services/auth/IdentityService.ts,public.reserved_usernames,IMPLEMENTED AND VERIFIED,Regex ^[a-z0-9_]{3,30}$ enforced
+Profile Editing,Authentication,ProfileViewerModal,src/components/modals/ProfileViewerModal.tsx,public.profiles,IMPLEMENTED AND VERIFIED,Updates name bio and avatar
+Account Deletion,Authentication,-,-,-,NOT IMPLEMENTED,No delete account UI or purge RPC
+Session Management,Authentication,AuthContext,src/contexts/AuthContext.tsx,Supabase Auth Session,IMPLEMENTED AND VERIFIED,Auto-refreshes tokens and profile state
+One-to-One Chats,Messaging,ChatView,src/components/yo/YoApp.tsx,RPC get_or_create_direct_conversation,IMPLEMENTED AND VERIFIED,Creates conversation and mutual members
+Group Chats,Messaging,CreateGroupModal,src/components/modals/CreateGroupModal.tsx,public.conversations (type=group),IMPLEMENTED AND VERIFIED,Selects participants and creates group
+Message Sending,Messaging,ChatView,src/features/messaging/services/MessageOutboxService.ts,RPC send_message,IMPLEMENTED AND VERIFIED,Optimistic client ID + monotonic seq
+Message Receiving,Messaging,YoApp,src/components/yo/YoApp.tsx,postgres_changes + broadcast,IMPLEMENTED AND VERIFIED,Realtime listener updates chatList & views
+Message Reply (Quote),Messaging,ChatView,src/components/yo/YoApp.tsx,public.messages.reply_to_id,IMPLEMENTED AND VERIFIED,Renders quoted preview snippet in bubble
+Message Reactions,Messaging,ChatView,src/components/yo/YoApp.tsx,Supabase broadcast reaction,IMPLEMENTED BUT NOT VERIFIED,Emoji chip overlay; transient storage
+Message Editing,Messaging,-,-,-,NOT IMPLEMENTED,No edit message UI or RPC
+Message Deletion,Messaging,ChatView,src/components/yo/YoApp.tsx,public.messages.delete,PARTIALLY IMPLEMENTED,UI action present; soft-delete RPC missing
+Message Forwarding,Messaging,ChatView,src/components/yo/YoApp.tsx,MessageOutboxService.ts,PARTIALLY IMPLEMENTED,Copies message snippet to another chat outbox
+Typing Indicators,Messaging,ChatView,src/components/yo/YoApp.tsx,Supabase broadcast typing,IMPLEMENTED AND VERIFIED,Animated 3-dot bounce with 2.5s timer
+Online Presence,Messaging,ChatView,src/components/yo/YoApp.tsx,Supabase Presence,IMPLEMENTED AND VERIFIED,Green dot on avatar reflects presence
+Delivery Receipts,Messaging,MessageStatusIndicator,src/features/messaging/services/ReceiptService.ts,RPC acknowledge_delivery,IMPLEMENTED AND VERIFIED,Transitions single check to double check
+Read Receipts,Messaging,MessageStatusIndicator,src/features/messaging/services/ReceiptService.ts,RPC acknowledge_conversation_read,IMPLEMENTED AND VERIFIED,Transitions double check to blue check
+Unread Badges,Messaging,ChatsTab,src/components/yo/YoApp.tsx,public.messages > last_read_at,IMPLEMENTED AND VERIFIED,Renders unread pill badge or '99+'
+Pinned Messages,Messaging,ChatView,src/components/yo/YoApp.tsx,localStorage,PARTIALLY IMPLEMENTED,Pin toggle active; persists in local storage
+Starred Messages,Messaging,ChatView,src/components/yo/YoApp.tsx,localStorage,PARTIALLY IMPLEMENTED,Star toggle active; persists in local storage
+Date Separators,Messaging,DateSeparator,src/features/messaging/components/DateSeparator.tsx,Client calculation,IMPLEMENTED AND VERIFIED,Shows Today Yesterday or calendar date
+Unread Separator,Messaging,UnreadSeparator,src/features/messaging/components/UnreadSeparator.tsx,Client calculation,IMPLEMENTED AND VERIFIED,Renders red bar above unread messages
+Image Messages,Media,ImageBubble,src/services/media/ImageService.ts,public.messages (Base64 JPEG),IMPLEMENTED AND VERIFIED,Canvas downscaling to 1280px + lightbox
+Video Messages,Media,VideoBubble,src/components/yo/VideoBubble.tsx,public.messages (Base64 Video),IMPLEMENTED AND VERIFIED,25MB limit check + inline HTML5 video
+Voice Recordings,Media,VoiceNoteBubble,src/services/voice/VoiceRecorderService.ts,public.messages (Base64 Audio),IMPLEMENTED AND VERIFIED,MediaRecorder API + waveform playback
+Document Attachments,Media,DocumentBubble,src/components/yo/DocumentBubble.tsx,public.messages (Base64 Doc),IMPLEMENTED AND VERIFIED,Supports PDF DOC XLSX TXT up to 15MB
+Lightbox Media Viewer,Media,LightboxModal,src/components/yo/LightboxModal.tsx,Client modal,IMPLEMENTED AND VERIFIED,Pinch-to-zoom and pan controls
+Upload Progress,Media,-,-,-,NOT IMPLEMENTED,Base64 generation lacks percentage progress
+Cloud Storage Buckets,Media,-,-,Supabase Storage,NOT IMPLEMENTED,Currently stored in database text fields
+Updates Home Screen,Status,UpdatesHomeScreen,src/features/status/components/UpdatesHomeScreen.tsx,public.statuses,IMPLEMENTED AND VERIFIED,Displays Recent Viewed and Muted rows
+Create Text Status,Status,AddStatusModal,src/features/status/components/AddStatusModal.tsx,statuses (type=text),IMPLEMENTED AND VERIFIED,6 gradient backgrounds + typography
+Create Photo Status,Status,AddStatusModal,src/features/status/components/AddStatusModal.tsx,statuses (type=image),IMPLEMENTED AND VERIFIED,Camera and gallery integration
+Create Video Status,Status,AddStatusModal,src/features/status/components/AddStatusModal.tsx,statuses (type=video),IMPLEMENTED AND VERIFIED,10-second video playback duration
+Status Expiration,Status,StatusService,src/features/status/services/StatusService.ts,expires_at = NOW() + 24h,IMPLEMENTED AND VERIFIED,Statuses hidden after 24 hours
+Status Viewer,Status,StatusViewerModal,src/features/status/components/StatusViewerModal.tsx,Client timer,IMPLEMENTED AND VERIFIED,Multi-bar progress timer + pause on hold
+View Tracking,Status,StatusViewerModal,src/features/status/services/StatusService.ts,public.status_views,IMPLEMENTED AND VERIFIED,Inserts row into status_views on open
+Viewers Drawer,Status,StatusViewerModal,src/features/status/components/StatusViewerModal.tsx,status_views + profiles,IMPLEMENTED AND VERIFIED,Swipe-up drawer displays viewer names
+Status Reactions,Status,StatusViewerModal,src/features/status/components/StatusViewerModal.tsx,public.status_likes,IMPLEMENTED AND VERIFIED,Heart pop animation and like counter
+Status Privacy,Status,StatusPrivacyModal,src/features/status/components/StatusPrivacyModal.tsx,public.user_status_preferences,IMPLEMENTED AND VERIFIED,Contacts Whitelist and Blacklist modes
+Mute/Unmute Status,Status,UpdatesHomeScreen,src/features/status/services/StatusService.ts,user_status_preferences,IMPLEMENTED AND VERIFIED,Collapses muted publisher into Muted list
+Outgoing Call Flow,Calls,CallOverlay,src/features/calls/webrtc/WebRTCService.ts,Supabase broadcast incoming_call,IMPLEMENTED AND VERIFIED,SDP offer creation + ringing sound
+Incoming Call Modal,Calls,YoApp,src/components/yo/YoApp.tsx,Supabase broadcast incoming_call,IMPLEMENTED AND VERIFIED,Ringing modal with Accept & Decline buttons
+WebRTC Signaling,Calls,WebRTCService,src/features/calls/webrtc/WebRTCService.ts,Supabase broadcast SDP & ICE,IMPLEMENTED AND VERIFIED,Full peer connection handshake
+Media Stream Capture,Calls,WebRTCService,src/features/calls/webrtc/WebRTCService.ts,navigator.mediaDevices.getUserMedia,IMPLEMENTED AND VERIFIED,Camera and mic constraints + fallbacks
+Mute Mic / Camera,Calls,CallOverlay,src/features/calls/components/CallOverlay.tsx,WebRTCService track.enabled,IMPLEMENTED AND VERIFIED,Toggles audio and video tracks live
+TURN Relay Fallback,Calls,WebRTCService,src/features/calls/webrtc/WebRTCService.ts,STUN Google,PARTIALLY IMPLEMENTED,STUN present; TURN relay missing
+Call History Tab,Calls,CallsTab,src/components/yo/YoApp.tsx,public.call_sessions,MOCKED / DEMO,Renders static sample calls array
+Native Android TTS,Feedback & Voice,VoiceAssistantService,src/services/voice/VoiceAssistantService.ts,@capacitor-community/text-to-speech,IMPLEMENTED AND VERIFIED,Native Android TTS spoken announcement
+Web Audio Synthesizer,Feedback & Voice,SoundEffectsService,src/services/feedback/SoundEffectsService.ts,Web Audio API Oscillators,IMPLEMENTED AND VERIFIED,Synthesized glass chime pulse bubble
+Heads-up Notification,Feedback & Voice,NotificationService,src/services/notifications/NotificationService.ts,@capacitor/local-notifications,IMPLEMENTED AND VERIFIED,Android high-importance channel with popup
+Haptic Feedback,Feedback & Voice,HapticsService,src/services/feedback/HapticsService.ts,@capacitor/haptics,IMPLEMENTED AND VERIFIED,Selection light medium and heavy haptics
+Status Bar Controller,Feedback & Voice,main.tsx,src/main.tsx,@capacitor/status-bar,IMPLEMENTED AND VERIFIED,Dynamic dark and light status bar
+Cyber-Neon App Icon,Feedback & Voice,Native Launcher,android/app/src/main/res/,Android Adaptive Icons,IMPLEMENTED AND VERIFIED,Custom cyber-neon icon installed
+Theme Selector,Settings,ThemePreferenceModal,src/components/modals/ThemePreferenceModal.tsx,localStorage + CSS dark class,IMPLEMENTED AND VERIFIED,Light Glass Dark Glass and System
+Custom Alert Tones,Settings,NotificationSettingsModal,src/services/voice/VoiceAssistantService.ts,localStorage settings,IMPLEMENTED AND VERIFIED,Preview and toggle 4 tone types
+Contact Mute / Block,Settings,ChatContactInfoDrawer,src/components/modals/ChatContactInfoDrawer.tsx,public.user_blocks,IMPLEMENTED AND VERIFIED,Mute toggle and block contact action
+Chat Lock,Settings,ChatsTab,src/components/yo/YoApp.tsx,localStorage yo_locked_chats,IMPLEMENTED AND VERIFIED,Hides preview and adds lock badge
+Chat Archive,Settings,ChatsTab,src/components/yo/YoApp.tsx,localStorage yo_archived_chats,IMPLEMENTED AND VERIFIED,Collapsible Archived chats folder
+Custom Contact Lists,Settings,ChatsTab,src/components/yo/YoApp.tsx,localStorage yo_custom_lists,IMPLEMENTED AND VERIFIED,Filter chips for custom contact groups
+Chat Wallpaper,Settings,ChatView,src/components/yo/YoApp.tsx,Local theme presets,PARTIALLY IMPLEMENTED,Visual selector active; lacks cloud sync
+Channels Placeholder,Discovery,UpdatesHomeScreen,src/features/status/components/UpdatesHomeScreen.tsx,-,UI ONLY,Visual placeholder with 'Coming Soon' tag

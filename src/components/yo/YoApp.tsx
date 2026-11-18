@@ -2952,6 +2952,41 @@ export function YoApp() {
         .eq('user_id', user.id);
 
       if (!error && convMembers && convMembers.length > 0) {
+        // Collect conversation IDs that need other-member lookups
+        const directConvIds = convMembers
+          .filter(item => (item.conversations as any)?.type !== 'group')
+          .map(item => item.conversation_id);
+
+        let otherMembersMap: Record<string, string> = {};
+        if (directConvIds.length > 0) {
+          const { data: memberRows } = await supabase
+            .from('conversation_members')
+            .select('conversation_id, user_id')
+            .in('conversation_id', directConvIds)
+            .neq('user_id', user.id);
+
+          if (memberRows) {
+            memberRows.forEach(r => {
+              otherMembersMap[r.conversation_id] = r.user_id;
+            });
+          }
+        }
+
+        const distinctUserIds = Array.from(new Set(Object.values(otherMembersMap)));
+        let profilesMap: Record<string, Profile> = {};
+        if (distinctUserIds.length > 0) {
+          const { data: profileRows } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', distinctUserIds);
+
+          if (profileRows) {
+            profileRows.forEach((p: Profile) => {
+              profilesMap[p.id] = p;
+            });
+          }
+        }
+
         const formatted: Chat[] = [];
         for (const item of convMembers) {
           const conv = item.conversations as any;
@@ -2969,44 +3004,8 @@ export function YoApp() {
             handle = "group";
             hue = (name.charCodeAt(0) * 41) % 360;
           } else {
-            // 1. Fetch other participant user_id from conversation_members
-            const { data: otherMember } = await supabase
-              .from('conversation_members')
-              .select('user_id')
-              .eq('conversation_id', conv.id)
-              .neq('user_id', user.id)
-              .maybeSingle();
-
-            let profile: Profile | null = null;
-            if (otherMember?.user_id) {
-              const { data: pData } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', otherMember.user_id)
-                .maybeSingle();
-              profile = pData;
-            }
-
-            if (!profile) {
-              // Check recent message sender
-              const { data: recentMsg } = await supabase
-                .from('messages')
-                .select('sender_id')
-                .eq('conversation_id', conv.id)
-                .neq('sender_id', user.id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-
-              if (recentMsg?.sender_id) {
-                const { data: pData } = await supabase
-                  .from('profiles')
-                  .select('*')
-                  .eq('id', recentMsg.sender_id)
-                  .maybeSingle();
-                profile = pData;
-              }
-            }
+            const peerUserId = otherMembersMap[conv.id];
+            let profile: Profile | null = peerUserId ? profilesMap[peerUserId] : null;
 
             if (profile) {
               name = profile.display_name || `@${profile.username}`;

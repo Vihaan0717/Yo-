@@ -3,7 +3,7 @@
  * Authoritative types for the Yo!!! messaging engine.
  */
 
-export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'retrying';
 
 export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'file' | 'system';
 
